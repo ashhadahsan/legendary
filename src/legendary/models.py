@@ -47,9 +47,19 @@ class Memory(BaseModel):
 
     @classmethod
     def from_markdown(cls, text: str) -> "Memory":
-        parts = text.split(f"{FRONTMATTER_SEP}\n", 2)
-        if len(parts) < 3 or parts[0].strip():
+        # The delimiter scan is anchored to line boundaries: a bare substring
+        # search would treat any "---" at the end of a frontmatter value (a
+        # title, tag, or deprecation reason) as the closing delimiter.
+        opening = f"{FRONTMATTER_SEP}\n"
+        if not text.startswith(opening):
             raise ValueError("not a frontmatter markdown memory")
-        meta = yaml.safe_load(parts[1])
-        body = parts[2].rstrip("\n")
+        rest = text[len(opening) :]
+        end = rest.find(f"\n{FRONTMATTER_SEP}\n")
+        if end == -1:
+            raise ValueError("unterminated frontmatter in markdown memory")
+        meta = yaml.safe_load(rest[:end])
+        if not isinstance(meta, dict):
+            raise ValueError("frontmatter is not a mapping")
+        meta.pop("body", None)
+        body = rest[end + len(FRONTMATTER_SEP) + 2 :].rstrip("\n")
         return cls(body=body, **meta)

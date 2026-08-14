@@ -1,5 +1,7 @@
 from datetime import datetime, timezone
 
+import pytest
+
 from legendary.models import Anchor, Memory
 
 
@@ -62,3 +64,60 @@ def test_defaults():
     assert mem.anchors == []
     assert mem.tags == []
     assert mem.deprecated_reason is None
+
+
+def round_trip(mem: Memory) -> Memory:
+    return Memory.from_markdown(mem.to_markdown())
+
+
+def test_round_trip_body_containing_hrule():
+    mem = make_memory().model_copy(update={"body": "before\n\n---\n\nafter"})
+    assert round_trip(mem) == mem
+
+
+def test_round_trip_deprecated_memory():
+    mem = make_memory().model_copy(
+        update={
+            "status": "deprecated",
+            "deprecated_reason": "superseded by busy_timeout",
+        }
+    )
+    text = mem.to_markdown()
+    assert "status: deprecated" in text
+    assert Memory.from_markdown(text) == mem
+
+
+def test_active_memory_omits_deprecated_reason_from_frontmatter():
+    assert "deprecated_reason" not in make_memory().to_markdown()
+
+
+def test_round_trip_title_ending_in_separator():
+    mem = make_memory().model_copy(update={"title": "Deprecated approach ---"})
+    assert round_trip(mem) == mem
+
+
+def test_round_trip_tag_containing_separator():
+    mem = make_memory().model_copy(update={"tags": ["x---", "y"]})
+    assert round_trip(mem) == mem
+
+
+def test_round_trip_deprecated_reason_containing_separator_line():
+    mem = make_memory().model_copy(
+        update={"status": "deprecated", "deprecated_reason": "old\n---\nnew"}
+    )
+    assert round_trip(mem) == mem
+
+
+def test_from_markdown_rejects_text_without_frontmatter():
+    with pytest.raises(ValueError, match="not a frontmatter markdown memory"):
+        Memory.from_markdown("just a body, no frontmatter\n")
+
+
+def test_from_markdown_rejects_unterminated_frontmatter():
+    with pytest.raises(ValueError, match="unterminated frontmatter"):
+        Memory.from_markdown("---\nid: mem-x\ntype: decision\n")
+
+
+def test_from_markdown_rejects_non_mapping_frontmatter():
+    with pytest.raises(ValueError, match="frontmatter is not a mapping"):
+        Memory.from_markdown("---\n- a\n- b\n---\nbody\n")
