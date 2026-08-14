@@ -2164,6 +2164,128 @@ git commit -m "docs: README with quick start and staleness explanation"
 
 ---
 
+### Task 13: OSS infrastructure — LICENSE, CI, release workflow
+
+**Files:**
+- Create: `LICENSE`, `.github/workflows/ci.yml`, `.github/workflows/release.yml`
+- Modify: `pyproject.toml` (add ruff to dev group)
+
+- [ ] **Step 1: Create LICENSE (MIT)**
+
+```
+MIT License
+
+Copyright (c) 2026 Ashhad Ahsan
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+- [ ] **Step 2: Add ruff to dev dependencies**
+
+In `pyproject.toml`, change the dev group to:
+
+```toml
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+```
+
+Run: `uv sync && uv run ruff check src tests`
+Expected: exit 0 (fix any findings it reports — they will be import-order/unused-import level).
+
+- [ ] **Step 3: Create .github/workflows/ci.yml**
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.12", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Configure git for tests
+        run: |
+          git config --global user.email "ci@ci.ci"
+          git config --global user.name "ci"
+          git config --global init.defaultBranch main
+      - run: uv sync
+      - run: uv run ruff check src tests
+      - run: uv run pytest -q
+
+```
+
+Note the git config step: the test suite creates temp git repos; CI runners have no git identity configured, and `tests/conftest.py` sets repo-local identity — but the `init -b main` call must not warn-fail on old git. The global config is belt-and-braces.
+
+- [ ] **Step 4: Create .github/workflows/release.yml**
+
+```yaml
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write  # PyPI trusted publishing (OIDC), no stored token
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv build
+      - run: uv publish
+
+```
+
+Setup required once on PyPI (manual, outside this plan): create the `legendary` project, add a Trusted Publisher pointing at this repo + `release.yml` + environment `pypi`. Until then the workflow simply fails at `uv publish` — harmless.
+
+- [ ] **Step 5: Verify CI config locally**
+
+Run: `uv run python -c "import yaml,glob; [yaml.safe_load(open(f)) for f in glob.glob('.github/workflows/*.yml')]; print('yaml ok')"`
+Expected: `yaml ok`
+
+Run: `uv run pytest -q`
+Expected: all pass (what CI will run)
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add LICENSE .github pyproject.toml uv.lock
+git commit -m "chore: MIT license, CI matrix, PyPI trusted-publishing release"
+```
+
+---
+
 ## Self-review notes (done at plan-writing time)
 
 - **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).

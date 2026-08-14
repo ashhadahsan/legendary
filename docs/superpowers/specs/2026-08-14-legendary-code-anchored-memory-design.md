@@ -202,6 +202,15 @@ TDD throughout (pytest):
 - **Property-style:** reindex idempotence (reindex(reindex(x)) == reindex(x));
   markdown files survive round-trip without diff noise.
 
+## 5b. Repo infrastructure (OSS hygiene)
+
+- **MIT LICENSE** file.
+- **CI (GitHub Actions):** on push/PR — `uv sync` + `pytest` on a matrix of
+  {ubuntu, macos} × {3.12, 3.13}; `ruff check` for lint. Must pass before merge.
+- **Release (GitHub Actions):** on version tag `v*` — build with `uv build`,
+  publish to PyPI via trusted publishing (OIDC, no stored token). This is what
+  makes `uvx legendary` work for end users.
+
 ## 6. Roadmap after v1
 
 1. **v1.x** — extraction quality, more tree-sitter languages, Cursor/Codex hook
