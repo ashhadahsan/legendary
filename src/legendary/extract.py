@@ -91,7 +91,7 @@ def extract_from_transcript(repo_root: Path, transcript_path: Path) -> list[str]
         try:
             result = service.remember(
                 repo_root,
-                type=cand.get("type", "reference"),
+                type=str(cand.get("type") or "reference"),
                 title=cand["title"],
                 body=cand.get("body", ""),
                 anchors=anchors,
@@ -99,13 +99,16 @@ def extract_from_transcript(repo_root: Path, transcript_path: Path) -> list[str]
                 source="auto-extract",
             )
         except ValueError:
+            raw_type = cand.get("type")
+            safe_type = (
+                raw_type
+                if raw_type in ("decision", "episode", "convention", "reference")
+                else "reference"
+            )
             try:  # bad anchor or type: retry without anchors, safe type
                 result = service.remember(
                     repo_root,
-                    type=cand.get("type")
-                    if cand.get("type")
-                    in ("decision", "episode", "convention", "reference")
-                    else "reference",
+                    type=safe_type,
                     title=cand["title"],
                     body=cand.get("body", ""),
                     anchors=[],

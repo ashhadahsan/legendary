@@ -7,7 +7,10 @@ from legendary.store import delete, load, load_all, memories_dir, save
 
 def mem(i: str = "mem-00000001", title: str = "t") -> Memory:
     return Memory(
-        id=i, type="decision", title=title, body="body",
+        id=i,
+        type="decision",
+        title=title,
+        body="body",
         created=datetime(2026, 8, 14, tzinfo=timezone.utc),
     )
 

@@ -59,7 +59,9 @@ def test_region_text_unresolvable_symbol_falls_back_to_file(repo: Path):
 
 
 def test_resolve_and_hash_fills_fields(repo: Path):
-    anchor = resolve_and_hash(repo, Anchor(file="src/sync/worker.py", symbol="SyncWorker.run"))
+    anchor = resolve_and_hash(
+        repo, Anchor(file="src/sync/worker.py", symbol="SyncWorker.run")
+    )
     assert anchor.content_hash and anchor.content_hash.startswith("sha256:")
     assert anchor.commit and len(anchor.commit) >= 7
     assert anchor.lines is not None  # resolved span recorded for fallback

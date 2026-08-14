@@ -44,11 +44,11 @@ def remember(
     try:
         memory = Memory(
             id=Memory.new_id(title, created),
-            type=type,  # type: ignore[arg-type]
+            type=type,
             title=title,
             body=body,
             created=created,
-            source=source,  # type: ignore[arg-type]
+            source=source,
             anchors=resolved,
             tags=tags or [],
         )

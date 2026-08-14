@@ -33,7 +33,9 @@ def seed(repo: Path):
     save(repo, mem("mem-2", "auth token refresh", "refresh tokens rotate hourly"))
     save(
         repo,
-        mem("mem-3", "old sqlite note", "deprecated sqlite advice", status="deprecated"),
+        mem(
+            "mem-3", "old sqlite note", "deprecated sqlite advice", status="deprecated"
+        ),
     )
     rebuild(repo)
 

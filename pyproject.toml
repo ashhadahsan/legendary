@@ -15,7 +15,13 @@ dependencies = [
 legendary = "legendary.cli:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = [
+    "mypy>=1.11",
+    "pre-commit>=3.7",
+    "pytest>=8.0",
+    "ruff>=0.6,<0.17",
+    "types-pyyaml>=6.0.12.20260724",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -26,3 +32,23 @@ packages = ["src/legendary"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+# Pin the rule set explicitly. Ruff's DEFAULT selection widened between 0.14
+# and 0.16 (UP045/UP017/BLE001/C408/PLW1510 etc.), which flags 40+ findings in
+# this codebase - several of them deliberate, like the broad `except Exception`
+# in store.load_all that test_load_all_skips_malformed_files depends on.
+select = ["E4", "E7", "E9", "F", "I"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/legendary"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+exclude = ["^tests/"]
+
+[[tool.mypy.overrides]]
+module = ["tree_sitter_language_pack.*", "mcp.*"]
+ignore_missing_imports = true

@@ -1,4 +1,5 @@
 """Core data models: Anchor and Memory, with markdown (de)serialization."""
+
 from __future__ import annotations
 
 import hashlib

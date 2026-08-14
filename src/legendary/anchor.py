@@ -66,7 +66,9 @@ def _symbol_span(path: Path, symbol: str) -> Optional[tuple[int, int]]:
     return (scope.start_point[0] + 1, scope.end_point[0] + 1)
 
 
-def region_text(repo_root: Path, anchor: Anchor) -> Optional[tuple[str, tuple[int, int]]]:
+def region_text(
+    repo_root: Path, anchor: Anchor
+) -> Optional[tuple[str, tuple[int, int]]]:
     """Resolve anchor to (text, (start_line, end_line)). None if file is gone.
 
     Resolution order: symbol -> lines -> whole file. An unresolvable symbol

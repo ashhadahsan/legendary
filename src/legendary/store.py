@@ -1,4 +1,5 @@
 """Canonical markdown store under <repo>/.legendary/memories/."""
+
 from __future__ import annotations
 
 import sys
