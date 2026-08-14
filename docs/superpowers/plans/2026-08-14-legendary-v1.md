@@ -4,9 +4,9 @@
 
 **Goal:** Build legendary v1 — a local-first MCP server + CLI that gives coding agents code-anchored, staleness-aware, git-native memory.
 
-**Architecture:** Canonical store is one frontmatter-markdown file per memory in `.legendary/memories/` inside the *target* repo; a derived SQLite FTS5 index (`.legendary/index.db`, gitignored) serves search. Anchors bind memories to `{file, symbol?, lines?, commit, content_hash}`; staleness is computed at recall time by re-resolving and re-hashing the anchored region. An MCP server (FastMCP) and a CLI both call a shared `service.py` layer.
+**Architecture:** Canonical store is one frontmatter-markdown file per memory in `.legendary/memories/` inside the *target* repo; a derived SQLite FTS5 index (`.legendary/index.db`, gitignored) serves search. Anchors bind memories to `{file, symbol?, lines?, commit, content_hash}`; staleness is computed at recall time by re-resolving and re-hashing the anchored region. An MCP server (mcp 2.x `MCPServer`) and a CLI both call a shared `service.py` layer.
 
-**Tech Stack:** Python 3.12, uv, pydantic v2, PyYAML, `mcp` SDK (FastMCP), `tree-sitter-language-pack` (symbol resolution for py/js/ts), stdlib `sqlite3` + FTS5, stdlib `argparse`, pytest.
+**Tech Stack:** Python 3.12, uv, pydantic v2, PyYAML, `mcp` SDK 2.x (`mcp.server.mcpserver`), `tree-sitter-language-pack` (symbol resolution for py/js/ts), stdlib `sqlite3` + FTS5, stdlib `argparse`, pytest.
 
 **Spec:** `docs/superpowers/specs/2026-08-14-legendary-code-anchored-memory-design.md`
 
@@ -27,7 +27,7 @@ src/legendary/index.py         # SQLite FTS5 build/rebuild/search
 src/legendary/rank.py          # score + recall ranking
 src/legendary/service.py       # remember/recall/list/deprecate/stale_report (used by MCP + CLI)
 src/legendary/extract.py       # transcript -> memory candidates via `claude -p`
-src/legendary/mcp_server.py    # FastMCP tool wrappers around service
+src/legendary/mcp_server.py    # mcp 2.x tool wrappers around service
 src/legendary/cli.py           # init/search/reindex/doctor/extract/inject/mcp
 tests/conftest.py              # temp git-repo fixture
 tests/test_models.py
@@ -40,6 +40,19 @@ tests/test_service.py
 tests/test_extract.py
 tests/test_mcp_server.py
 tests/test_cli.py
+tests/test_polish.py           # Task 14
+README.md                      # Task 12
+LICENSE                        # Task 13
+.github/workflows/ci.yml       # Task 13
+.github/workflows/release.yml  # Task 13
+.github/workflows/docs.yml     # Task 15
+mkdocs.yml                     # Task 15
+CONTRIBUTING.md                # Task 15
+docs/{index,quickstart,concepts,tools,cli,faq}.md          # Task 15
+docs/{benchmark,comparison}.md                             # Task 16
+bench/{README.md,run_bench.py,report.py,scenario/}         # Task 16
+.pre-commit-config.yaml        # Task 17
+scripts/quality_hook.py        # Task 17
 ```
 
 All modules take an explicit `repo_root: Path` — no global state. `.legendary/` always lives at `repo_root/.legendary/`.
@@ -55,7 +68,7 @@ All modules take an explicit `repo_root: Path` — no global state. `.legendary/
 
 ```toml
 [project]
-name = "legendary"
+name = "legendary-mcp"  # `legendary` is taken on PyPI; CLI command stays `legendary`
 version = "0.1.0"
 description = "Code-anchored, staleness-aware, git-native memory for coding agents"
 requires-python = ">=3.12"
@@ -1914,8 +1927,6 @@ git commit -m "feat: transcript memory extraction via headless claude"
 import json
 from pathlib import Path
 
-import pytest
-
 from legendary import cli, service
 
 
@@ -2004,7 +2015,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import datetime, timezone
 from pathlib import Path
 
 from legendary import index as idx
@@ -2027,7 +2037,7 @@ Add legendary to your MCP client, e.g. Claude Code (.mcp.json):
   "mcpServers": {
     "legendary": {
       "command": "uvx",
-      "args": ["legendary", "mcp", "--repo", "%s"]
+      "args": ["--from", "legendary-mcp", "legendary", "mcp", "--repo", "%s"]
     }
   }
 }
@@ -2037,9 +2047,9 @@ Claude Code hooks (.claude/settings.json) for auto-capture:
 {
   "hooks": {
     "SessionStart": [{"hooks": [{"type": "command",
-      "command": "uvx legendary inject --repo %s"}]}],
+      "command": "uvx --from legendary-mcp legendary inject --repo %s"}]}],
     "SessionEnd": [{"hooks": [{"type": "command",
-      "command": "uvx legendary extract --repo %s"}]}]
+      "command": "uvx --from legendary-mcp legendary extract --repo %s"}]}]
   }
 }
 
@@ -2201,7 +2211,7 @@ because argparse hands trailing options to the subparser.
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_cli.py -v`
-Expected: 9 passed
+Expected: 8 passed
 
 - [ ] **Step 5: Run the whole suite**
 
@@ -2250,7 +2260,7 @@ legendary merges the two sides:
 
 ```bash
 cd your-repo
-uvx legendary init     # scaffolds .legendary/, prints MCP + hook setup
+uvx --from legendary-mcp legendary init     # scaffolds .legendary/, prints MCP + hook setup
 ```
 
 Add the printed MCP snippet to your client (Claude Code, Cursor, any MCP
@@ -2271,7 +2281,10 @@ Optional auto-capture (Claude Code): the printed hooks run
 
 ## CLI
 
-`legendary init | search <q> | reindex | doctor | extract [transcript] | inject | mcp`
+`legendary init | search <q> | reindex | doctor | extract [transcript] | inject | surface | mcp`
+
+`legendary mcp` serves stdio by default; `--transport http` serves stateless
+streamable HTTP for containers and shared team deployments.
 
 ## How staleness works
 
@@ -2289,7 +2302,7 @@ flowchart TB
         agent["Coding agent"]
     end
 
-    subgraph legendary["legendary (uvx legendary)"]
+    subgraph legendary["legendary (uvx --from legendary-mcp)"]
         mcp["MCP server<br/>remember - recall - list_memories<br/>deprecate - stale_report"]
         cli["CLI<br/>init - search - reindex - doctor<br/>extract - inject"]
         svc["service layer"]
@@ -2409,11 +2422,19 @@ In `pyproject.toml`, change the dev group to:
 
 ```toml
 [dependency-groups]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6,<0.17"]
+
+[tool.ruff.lint]
+# Pin the rule set explicitly. Ruff's DEFAULT selection widened between 0.14
+# and 0.16 (UP045/UP017/BLE001/C408/PLW1510 etc.), which flags 40+ findings in
+# this codebase - several of them deliberate, like the broad `except Exception`
+# in store.load_all that test_load_all_skips_malformed_files depends on.
+select = ["E4", "E7", "E9", "F", "I"]
 ```
 
 Run: `uv sync && uv run ruff check src tests`
-Expected: exit 0 (fix any findings it reports — they will be import-order/unused-import level).
+Expected: exit 0. If it reports anything, it will be unused-import / import-order
+level; `uv run ruff check --fix src tests` clears those.
 
 - [ ] **Step 3: Create .github/workflows/ci.yml**
 
@@ -2666,7 +2687,9 @@ each call's kwargs.
 ```python
 def memories_for_file(repo_root: Path, file: str) -> list[str]:
     """Active memory ids anchored to a file (repo-relative path)."""
-    conn = _connect(repo_root)
+    # _ensure_populated, not bare _connect: the PreToolUse hook must work on a
+    # fresh clone where memories are committed but index.db is absent.
+    conn = _ensure_populated(repo_root, _connect(repo_root))
     try:
         rows = conn.execute(
             """
@@ -2684,7 +2707,9 @@ def memories_for_file(repo_root: Path, file: str) -> list[str]:
 
 - [ ] **Step 7: Implement — cli.py surface command**
 
-Register the subcommand in `main()`: `sub.add_parser("surface")`, and add
+Register the subcommand in `main()` with the Task 11 `_add_repo` helper —
+`--repo` MUST live on the subparser, never the main parser:
+`_add_repo(sub.add_parser("surface"))`. Then add
 `case "surface": return _cmd_surface(repo)` to the match. Implementation:
 
 ```python
@@ -2715,6 +2740,7 @@ def _cmd_surface(repo: Path) -> int:
     from legendary.stale import check_memory, worst_verdict
     from legendary.store import load
     lines = []
+    rendered: list[str] = []
     for mid in new_ids[:5]:
         m = load(repo, mid)
         if m is None or m.status != "active":
@@ -2722,10 +2748,13 @@ def _cmd_surface(repo: Path) -> int:
         verdict = worst_verdict(check_memory(repo, m.anchors))
         flag = "" if verdict == "fresh" else f" [{verdict} - verify against current code]"
         lines.append(f"- [{m.type}] {m.title}{flag}: {m.body[:300]}")
+        rendered.append(mid)
     if not lines:
         return 0
     cache.parent.mkdir(parents=True, exist_ok=True)
-    cache.write_text(" ".join(sorted(seen | set(new_ids))))
+    # Only what was actually shown counts as seen, so a 6th memory on a hot
+    # file still surfaces later instead of being suppressed forever.
+    cache.write_text(" ".join(sorted(seen | set(rendered))))
     print(json.dumps({
         "hookSpecificOutput": {
             "hookEventName": "PreToolUse",
@@ -2743,11 +2772,11 @@ Also update `_MCP_SNIPPET`'s hooks block to include the PreToolUse hook:
   "hooks": {
     "PreToolUse": [{"matcher": "Read|Edit|Write",
       "hooks": [{"type": "command",
-      "command": "uvx legendary surface --repo %s"}]}],
+      "command": "uvx --from legendary-mcp legendary surface --repo %s"}]}],
     "SessionStart": [{"hooks": [{"type": "command",
-      "command": "uvx legendary inject --repo %s"}]}],
+      "command": "uvx --from legendary-mcp legendary inject --repo %s"}]}],
     "SessionEnd": [{"hooks": [{"type": "command",
-      "command": "uvx legendary extract --repo %s"}]}]
+      "command": "uvx --from legendary-mcp legendary extract --repo %s"}]}]
   }
 ```
 
@@ -2763,7 +2792,7 @@ pass it through to `service.remember(...)`. Extend the docstring:
 - [ ] **Step 9: Run the full suite**
 
 Run: `uv run pytest -q`
-Expected: all pass (test_polish.py 10 passed; existing tests unaffected — the
+Expected: all pass (test_polish.py 9 passed; existing tests unaffected — the
 new Memory fields are optional and excluded from markdown when None)
 
 Note: `.legendary/.surfaced-*` session caches must not be committed — add
@@ -2818,6 +2847,9 @@ theme:
     - media: "(prefers-color-scheme: dark)"
       scheme: slate
       toggle: {icon: material/brightness-4, name: Light mode}
+docs_dir: docs
+exclude_docs: |
+  superpowers/
 markdown_extensions:
   - admonition
   - pymdownx.superfences:
@@ -2831,8 +2863,21 @@ nav:
   - Concepts: concepts.md
   - MCP tools: tools.md
   - CLI: cli.md
+  - Benchmark: benchmark.md
+  - Comparison: comparison.md
   - FAQ: faq.md
 ```
+
+`exclude_docs` matters: this repo keeps its internal design spec and this
+implementation plan under `docs/superpowers/`, and mkdocs' default `docs_dir`
+is `docs/` — without the exclusion, both get published to the public site (and
+`--strict` fails them as not-in-nav anyway).
+
+`benchmark.md` and `comparison.md` are created by Task 16; add them to the nav
+now so the site is consistent whichever order the tasks run in. If Task 16 has
+not run yet, `mkdocs build --strict` will error on the two missing nav files —
+create them as one-line stubs (`# Benchmark` / `# Comparison`) that Task 16
+overwrites.
 
 - [ ] **Step 3: Write the docs pages**
 
@@ -2841,7 +2886,7 @@ pitch ("a memory that knows which code it's about, and knows when that code
 changed underneath it"), and the architecture + lifecycle mermaid diagrams
 copied verbatim from README.md (Task 12).
 
-`docs/quickstart.md` — `uvx legendary init`, paste the MCP config, first
+`docs/quickstart.md` — `uvx --from legendary-mcp legendary init`, paste the MCP config, first
 `remember`/`recall`, then edit the anchored function and show the memory turn
 stale. This is the "aha" demo; keep it under 2 minutes of reading.
 
@@ -2929,9 +2974,6 @@ git commit -m "docs: mkdocs-material site, contributor guide, docs CI"
 
 ---
 
-## Self-review notes (done at plan-writing time)
-
-- **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6), OSS infra: LICENSE/CI/release per spec 5b (Task 13). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).
 ### Task 16: Benchmark — head-to-head vs Graphify and baseline
 
 Publishes the numbers that justify the tool. Graphify's traction came partly
@@ -2976,8 +3018,10 @@ Each trial is TWO sessions with separate context (the amnesia boundary):
 - `tokens_total` = input + cache_creation + cache_read + output, both sessions
 - `cost_usd`, `duration_s`, `num_turns`
 - `repeated_failure` (bool) - did session 2 introduce the known-bad pattern?
-  Detected deterministically by grepping the final diff for
-  `BEGIN TRANSACTION` / `conn.execute("BEGIN` inside the retry path.
+  Detected deterministically by searching session 2's diff (case-insensitive)
+  for any of the patterns in `BAD_PATTERNS` in run_bench.py, which is exactly:
+  `BEGIN TRANSACTION` and `conn.execute("BEGIN`. This list and the code must
+  stay identical; changing one without the other invalidates the results.
 - `correct` (bool) - does `pytest` pass in the scenario repo afterwards?
 
 ## Rules
@@ -3000,6 +3044,23 @@ deliberate concurrency bug in two sibling modules:
   and passes once fixed, for BOTH modules.
 - `README.md` — deliberately does NOT mention the WAL/busy_timeout gotcha; that
   knowledge only exists in what the agent learns during session 1.
+- `pyproject.toml` — REQUIRED: each trial copies the fixture to a directory
+  outside this project, so without its own project file `uv run pytest` there
+  resolves nothing. Minimal content:
+
+```toml
+[project]
+name = "bench-scenario"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = []
+
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+```
 
 Verify the fixture is a valid scenario before benchmarking anything:
 
@@ -3034,8 +3095,15 @@ SESSION_2 = (
     "`pytest tests/test_sync.py -k reporter` passes. Do not modify the tests."
 )
 
-# the plausible-but-wrong approach session 1 teaches you to avoid
-BAD_PATTERN = "BEGIN TRANSACTION"
+# The plausible-but-wrong approach session 1 teaches you to avoid. Keep this
+# list identical to the one pre-registered in bench/README.md.
+BAD_PATTERNS = ["BEGIN TRANSACTION", 'conn.execute("BEGIN']
+
+# Graphify ships on PyPI as `graphifyy` (the `graphify` name is a different,
+# unrelated package). Confirm both invocations in Step 5 before benchmarking.
+GRAPHIFY_BUILD = ["uvx", "--from", "graphifyy", "graphify", "build", "."]
+GRAPHIFY_SERVE = {"command": "uvx",
+                  "args": ["--from", "graphifyy", "graphify", "serve"]}
 
 ARMS = {
     "baseline": [],
@@ -3050,22 +3118,23 @@ def mcp_config(tools: list[str], repo: Path) -> dict:
     if "legendary" in tools:
         servers["legendary"] = {
             "command": "uvx",
-            "args": ["legendary", "mcp", "--repo", str(repo)],
+            "args": ["--from", "legendary-mcp", "legendary", "mcp", "--repo", str(repo)],
         }
     if "graphify" in tools:
-        servers["graphify"] = {
-            "command": "python",
-            "args": ["-m", "graphify.serve"],
-            "cwd": str(repo),
-        }
+        servers["graphify"] = {**GRAPHIFY_SERVE, "cwd": str(repo)}
     return {"mcpServers": servers}
 
 
 def run_session(repo: Path, prompt: str, config_path: Path | None) -> dict:
+    # --dangerously-skip-permissions: headless -p cannot show a prompt, and
+    # --permission-mode acceptEdits still blocks Bash and MCP tool calls, so the
+    # agent could never run pytest. Safe here: every trial runs in a disposable
+    # copy of the fixture under --workdir, never in a real repo.
     cmd = ["claude", "-p", prompt, "--output-format", "json",
-           "--permission-mode", "acceptEdits", "--max-turns", "40"]
-    if config_path is not None:
-        cmd += ["--mcp-config", str(config_path), "--strict-mcp-config"]
+           "--dangerously-skip-permissions", "--max-turns", "40"]
+    # --strict-mcp-config on EVERY arm (baseline included, with an empty server
+    # map) so no arm inherits the operator's ambient MCP servers.
+    cmd += ["--mcp-config", str(config_path), "--strict-mcp-config"]
     started = time.monotonic()
     proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=1800)
     elapsed = time.monotonic() - started
@@ -3094,8 +3163,8 @@ def tests_pass(repo: Path) -> bool:
 def repeated_failure(repo: Path) -> bool:
     """Did the agent reintroduce the approach session 1 proved wrong?"""
     diff = subprocess.run(["git", "diff"], cwd=repo, capture_output=True,
-                          text=True).stdout
-    return BAD_PATTERN.lower() in diff.lower()
+                          text=True).stdout.lower()
+    return any(pat.lower() in diff for pat in BAD_PATTERNS)
 
 
 def trial(arm: str, index: int, workdir: Path) -> dict:
@@ -3106,13 +3175,14 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
     subprocess.run(["git", "commit", "-qm", "scenario"], cwd=repo, check=True)
 
     tools = ARMS[arm]
-    config_path = None
-    if tools:
-        config_path = repo / ".bench-mcp.json"
-        config_path.write_text(json.dumps(mcp_config(tools, repo)))
-        if "legendary" in tools:
-            subprocess.run(["uvx", "legendary", "init", "--repo", str(repo)],
-                           check=True, capture_output=True)
+    config_path = repo / ".bench-mcp.json"   # written for every arm, empty for baseline
+    config_path.write_text(json.dumps(mcp_config(tools, repo)))
+    if "legendary" in tools:
+        subprocess.run(["uvx", "--from", "legendary-mcp", "legendary", "init",
+                        "--repo", str(repo)], check=True, capture_output=True)
+    if "graphify" in tools:
+        # Graphify must index the repo before its MCP server can answer anything
+        subprocess.run(GRAPHIFY_BUILD, cwd=repo, check=True, capture_output=True)
 
     s1 = run_session(repo, SESSION_1, config_path)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
@@ -3203,7 +3273,19 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-- [ ] **Step 5: Smoke-test the harness with one cheap trial**
+- [ ] **Step 5a: Verify the Graphify invocation before comparing against it**
+
+Publishing a comparison against a tool we invoked incorrectly would be worse
+than publishing nothing. Confirm both commands actually exist:
+
+Run: `uvx --from graphifyy graphify --help`
+Expected: Graphify's help text listing its subcommands. Confirm the build and
+MCP-serve subcommands match `GRAPHIFY_BUILD` and `GRAPHIFY_SERVE` in
+run_bench.py; if the real CLI differs, update those two constants to match and
+note the version you tested (`uvx --from graphifyy graphify --version`) in
+bench/README.md so the comparison is reproducible.
+
+- [ ] **Step 5b: Smoke-test the harness with one cheap trial**
 
 Run: `uv run python bench/run_bench.py --arms baseline -n 1 --workdir /tmp/legbench`
 Expected: prints `running baseline trial 1/1...` then a line with
@@ -3258,6 +3340,222 @@ git commit -m "bench: four-arm benchmark vs graphify and baseline, with pre-regi
 
 ---
 
+### Task 17: Quality gates — pre-commit, mypy, and Claude Code hooks
+
+Same three checks wired at three levels: locally on commit (pre-commit), in CI
+(Task 13), and live while an agent edits (Claude Code hooks), so a coding agent
+gets the failure in-loop instead of at PR time.
+
+Tooling note: `ruff format` is a drop-in black replacement (same style, much
+faster) and `ruff check` already covers the pylint rules worth enforcing, so the
+stack is ruff-format + ruff-check + mypy rather than black + pylint + mypy.
+
+**Files:**
+- Create: `.pre-commit-config.yaml`, `scripts/quality_hook.py`
+- Modify: `pyproject.toml` (mypy config + dev deps), `.github/workflows/ci.yml`, `CONTRIBUTING.md`
+
+- [ ] **Step 1: Add mypy config and dev dependencies**
+
+In `pyproject.toml`, extend the dev group and add mypy settings:
+
+```toml
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6,<0.17", "mypy>=1.11", "pre-commit>=3.7"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src/legendary"]
+plugins = ["pydantic.mypy"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+disallow_untyped_defs = true
+# Tests stay untyped on purpose - they read better without annotations.
+exclude = ["^tests/"]
+
+[[tool.mypy.overrides]]
+module = ["tree_sitter_language_pack.*", "mcp.*"]
+ignore_missing_imports = true
+```
+
+- [ ] **Step 2: Verify the type check passes on the current code**
+
+Run: `uv sync && uv run mypy`
+Expected: `Success: no issues found in N source files`.
+
+If it reports errors, fix them in `src/legendary/` — do not weaken the config.
+Two are likely given the code written in earlier tasks: `_find_def`/`_symbol_span`
+in `anchor.py` take untyped tree-sitter nodes (annotate as `Any` and import
+`Any` from typing), and `_cmd_surface` in `cli.py` needs `hook: dict[str, Any]`.
+
+- [ ] **Step 3: Create .pre-commit-config.yaml**
+
+```yaml
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.16.3
+    hooks:
+      - id: ruff-format
+      - id: ruff
+        args: [--fix]
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+```
+
+mypy runs as a `local`/`system` hook rather than the mirrors-mypy repo so it
+type-checks against the project's real installed dependencies (pydantic's plugin
+needs them) instead of an isolated pre-commit virtualenv.
+
+- [ ] **Step 4: Install and verify the hooks**
+
+Run: `uv run pre-commit install && uv run pre-commit run --all-files`
+Expected: every hook reports `Passed` (formatting hooks may report `Failed` once
+while they rewrite files — re-run, and the second pass must be all green).
+
+- [ ] **Step 5: Create scripts/quality_hook.py**
+
+```python
+#!/usr/bin/env python3
+"""Claude Code PostToolUse hook: format, lint, and type-check edited python.
+
+Reads the hook payload on stdin. Exit 2 tells Claude the tool call had a
+problem and feeds stderr back to it, so the agent fixes the issue in-loop
+instead of discovering it at commit time.
+"""
+from __future__ import annotations
+
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def run(cmd: list[str]) -> tuple[int, str]:
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    return proc.returncode, (proc.stdout + proc.stderr).strip()
+
+
+def main() -> int:
+    try:
+        payload = json.load(sys.stdin)
+    except Exception:
+        return 0  # not hook-invoked; stay silent
+    path_str = (payload.get("tool_input") or {}).get("file_path")
+    if not path_str:
+        return 0
+    path = Path(path_str)
+    if path.suffix != ".py" or not path.is_file():
+        return 0
+
+    run(["uv", "run", "ruff", "format", str(path)])
+    run(["uv", "run", "ruff", "check", "--fix", str(path)])
+
+    problems: list[str] = []
+    code, out = run(["uv", "run", "ruff", "check", str(path)])
+    if code != 0 and out:
+        problems.append(out)
+    # mypy is configured over the package; only report lines about this file
+    code, out = run(["uv", "run", "mypy"])
+    if code != 0:
+        relevant = [ln for ln in out.splitlines() if path.name in ln]
+        if relevant:
+            problems.append("\n".join(relevant))
+
+    if problems:
+        print("legendary quality gate failed:\n" + "\n".join(problems),
+              file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+- [ ] **Step 6: Verify the hook on a deliberately broken file**
+
+```bash
+printf 'def f(x):\n  return  x+1\n' > /tmp/legendary_hook_probe.py
+echo '{"tool_input":{"file_path":"/tmp/legendary_hook_probe.py"}}' | \
+  uv run python scripts/quality_hook.py; echo "exit=$?"
+cat /tmp/legendary_hook_probe.py
+```
+
+Expected: the file is reformatted in place to `return x + 1` with 4-space
+indent. `exit=0` (ruff auto-fixed everything; mypy does not cover /tmp), which
+confirms the format path works. Then confirm the reporting path:
+
+```bash
+echo '{"tool_input":{"file_path":"src/legendary/rank.py"}}' | \
+  uv run python scripts/quality_hook.py; echo "exit=$?"
+```
+
+Expected: `exit=0` and no output on a clean tree.
+
+- [ ] **Step 7: Register the hook with Claude Code**
+
+Add to the `hooks` block that `legendary init` prints (in `cli.py`'s
+`_MCP_SNIPPET`), alongside the existing PreToolUse/SessionStart/SessionEnd
+entries — note this one is for people *developing legendary itself*, so document
+it in CONTRIBUTING.md rather than shipping it to users' repos:
+
+```json
+{
+  "hooks": {
+    "PostToolUse": [{"matcher": "Edit|Write",
+      "hooks": [{"type": "command",
+      "command": "uv run python scripts/quality_hook.py"}]}]
+  }
+}
+```
+
+In `CONTRIBUTING.md`, add a "Quality gates" section stating: the three checks
+are `uv run ruff format`, `uv run ruff check`, and `uv run mypy`; they run on
+commit via pre-commit, in CI, and live via the PostToolUse hook above; and CI is
+the source of truth, so a PR is not ready until `uv run pre-commit run
+--all-files` is green.
+
+- [ ] **Step 8: Add the same gates to CI**
+
+In `.github/workflows/ci.yml`, replace the single lint step with:
+
+```yaml
+      - run: uv run ruff format --check src tests
+      - run: uv run ruff check src tests
+      - run: uv run mypy
+```
+
+- [ ] **Step 9: Verify the whole gate**
+
+Run: `uv run ruff format --check src tests && uv run ruff check src tests && uv run mypy && uv run pytest -q`
+Expected: all four succeed; exit 0.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add .pre-commit-config.yaml scripts/quality_hook.py pyproject.toml \
+        .github/workflows/ci.yml CONTRIBUTING.md uv.lock
+git commit -m "chore: pre-commit, mypy, and Claude Code quality hooks"
+```
+
+---
+
+## Self-review notes (done at plan-writing time)
+
+- **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6), OSS infra: LICENSE/CI/release per spec 5b (Task 13). Config weights are written by `init` AND read by `rank._load_weights` (post-audit fix #5).
 ## Post-audit revisions (adversarial audit, 2026-08-14)
 
 A 4-lens adversarial audit (spec coverage, cross-task consistency, real-API

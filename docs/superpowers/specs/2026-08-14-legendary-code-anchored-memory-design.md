@@ -290,7 +290,14 @@ TDD throughout (pytest):
   `CONTRIBUTING.md`. For an MCP server the tool descriptions are the prompt the
   agent reads, so they are reviewed as documentation, not comments.
 - **CI (GitHub Actions):** on push/PR — `uv sync` + `pytest` on a matrix of
-  {ubuntu, macos} × {3.12, 3.13}; `ruff check` for lint. Must pass before merge.
+  {ubuntu, macos} × {3.12, 3.13}, plus the quality gate. Must pass before merge.
+- **Quality gates:** `ruff format` (black-equivalent), `ruff check` (lint), and
+  `mypy` (types), enforced in three places — pre-commit locally, CI on every PR,
+  and a Claude Code PostToolUse hook that runs them on each edited file so an
+  agent working on legendary gets failures in-loop rather than at commit time.
+- **Distribution name:** the PyPI project is `legendary-mcp` (`legendary` is
+  squatted by an empty placeholder package); the CLI command stays `legendary`,
+  so users run `uvx --from legendary-mcp legendary init`.
 - **Release (GitHub Actions):** on version tag `v*` — build with `uv build`,
   publish to PyPI via trusted publishing (OIDC, no stored token). This is what
   makes `uvx legendary` work for end users.
