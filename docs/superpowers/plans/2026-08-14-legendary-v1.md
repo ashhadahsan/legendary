@@ -2337,6 +2337,294 @@ git commit -m "chore: MIT license, CI matrix, PyPI trusted-publishing release"
 
 ---
 
+### Task 14: v1 polish — supersede links, transcript provenance, PreToolUse surfacing
+
+Adapted from Graphiti (invalidate-don't-delete, episode lineage) and Graphify
+(proactive file-read interception). Spec §6 item 1.
+
+**Files:**
+- Modify: `src/legendary/models.py` (two fields), `src/legendary/service.py` (supersedes param), `src/legendary/extract.py` (transcript ref), `src/legendary/index.py` (memories_for_file), `src/legendary/cli.py` (surface command + hook snippet), `src/legendary/mcp_server.py` (supersedes param)
+- Test: `tests/test_polish.py`
+
+- [ ] **Step 1: Write the failing tests**
+
+```python
+# tests/test_polish.py
+import io
+import json
+from pathlib import Path
+
+from legendary import cli, service
+from legendary.store import load
+
+
+def remember_one(repo: Path, title: str = "wal deadlock", **kw):
+    defaults = dict(
+        repo_root=repo, type="episode", title=title, body="busy_timeout",
+        anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
+        tags=[],
+    )
+    defaults.update(kw)
+    return service.remember(**defaults)
+
+
+def test_supersedes_deprecates_old_and_links(repo: Path):
+    old_id = remember_one(repo)["id"]
+    new_id = remember_one(repo, title="wal deadlock v2", supersedes=old_id)["id"]
+    old = load(repo, old_id)
+    assert old.status == "deprecated"
+    assert old.superseded_by == new_id
+    assert f"superseded by {new_id}" in old.deprecated_reason
+
+
+def test_supersedes_unknown_id_raises(repo: Path):
+    import pytest
+    with pytest.raises(ValueError, match="mem-nope"):
+        remember_one(repo, supersedes="mem-nope")
+
+
+def test_transcript_provenance_round_trips(repo: Path):
+    mid = remember_one(repo, transcript="/tmp/session.jsonl")["id"]
+    assert load(repo, mid).transcript == "/tmp/session.jsonl"
+
+
+def hook_stdin(monkeypatch, payload: dict):
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(payload)))
+
+
+def surface(repo: Path, monkeypatch, capsys, file: str, session: str = "s1"):
+    hook_stdin(monkeypatch, {
+        "session_id": session,
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / file)},
+    })
+    code = cli.main(["surface", "--repo", str(repo)])
+    return code, capsys.readouterr().out
+
+
+def test_surface_emits_additional_context(repo: Path, monkeypatch, capsys):
+    remember_one(repo)
+    code, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py")
+    assert code == 0
+    payload = json.loads(out)
+    ctx = payload["hookSpecificOutput"]["additionalContext"]
+    assert "wal deadlock" in ctx
+    assert payload["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+
+
+def test_surface_flags_stale_memories(repo: Path, monkeypatch, capsys):
+    remember_one(repo)
+    p = repo / "src/sync/worker.py"
+    p.write_text(p.read_text().replace("retries: int = 3", "retries: int = 8"))
+    _, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py")
+    assert "stale" in json.loads(out)["hookSpecificOutput"]["additionalContext"]
+
+
+def test_surface_dedupes_within_session(repo: Path, monkeypatch, capsys):
+    remember_one(repo)
+    surface(repo, monkeypatch, capsys, "src/sync/worker.py", session="s2")
+    _, out2 = surface(repo, monkeypatch, capsys, "src/sync/worker.py", session="s2")
+    assert out2.strip() == ""
+
+
+def test_surface_new_session_resurfaces(repo: Path, monkeypatch, capsys):
+    remember_one(repo)
+    surface(repo, monkeypatch, capsys, "src/sync/worker.py", session="s3")
+    _, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py", session="s4")
+    assert out.strip() != ""
+
+
+def test_surface_unanchored_file_silent(repo: Path, monkeypatch, capsys):
+    remember_one(repo)
+    _, out = surface(repo, monkeypatch, capsys, ".gitignore")
+    assert out.strip() == ""
+
+
+def test_surface_garbage_stdin_exits_zero(repo: Path, monkeypatch, capsys):
+    monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
+    assert cli.main(["surface", "--repo", str(repo)]) == 0
+```
+
+- [ ] **Step 2: Run tests to verify they fail**
+
+Run: `uv run pytest tests/test_polish.py -v`
+Expected: FAIL — `Memory` has no field `superseded_by`; `cli.main` has no `surface` command
+
+- [ ] **Step 3: Implement — models.py**
+
+Add two optional fields to `Memory` (after `deprecated_reason`):
+
+```python
+    superseded_by: Optional[str] = None
+    transcript: Optional[str] = None
+```
+
+- [ ] **Step 4: Implement — service.py**
+
+Add `supersedes` and `transcript` parameters to `remember` (after `source`):
+
+```python
+def remember(
+    repo_root: Path,
+    type: str,
+    title: str,
+    body: str,
+    anchors: Optional[list[dict]] = None,
+    tags: Optional[list[str]] = None,
+    source: str = "agent",
+    supersedes: Optional[str] = None,
+    transcript: Optional[str] = None,
+) -> dict[str, Any]:
+```
+
+Before building the new `Memory`, validate the target exists:
+
+```python
+    old = None
+    if supersedes is not None:
+        old = store.load(repo_root, supersedes)
+        if old is None:
+            raise ValueError(f"no such memory to supersede: {supersedes}")
+```
+
+Pass `transcript=transcript` into the `Memory(...)` constructor. After
+`store.save(repo_root, memory)` and before `idx.rebuild`, close the loop:
+
+```python
+    if old is not None:
+        store.save(repo_root, old.model_copy(update={
+            "status": "deprecated",
+            "deprecated_reason": f"superseded by {memory.id}",
+            "superseded_by": memory.id,
+        }))
+```
+
+- [ ] **Step 5: Implement — extract.py**
+
+In `extract_from_transcript`, pass provenance on BOTH `service.remember` calls
+(primary and the anchor-less retry): add `transcript=str(transcript_path)` to
+each call's kwargs.
+
+- [ ] **Step 6: Implement — index.py**
+
+```python
+def memories_for_file(repo_root: Path, file: str) -> list[str]:
+    """Active memory ids anchored to a file (repo-relative path)."""
+    conn = _connect(repo_root)
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT a.memory_id FROM mem_anchors a
+            JOIN mem_meta m ON m.id = a.memory_id
+            WHERE a.file = ? AND m.status = 'active'
+            ORDER BY a.memory_id
+            """,
+            (file,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()
+```
+
+- [ ] **Step 7: Implement — cli.py surface command**
+
+Register the subcommand in `main()`: `sub.add_parser("surface")`, and add
+`case "surface": return _cmd_surface(repo)` to the match. Implementation:
+
+```python
+def _cmd_surface(repo: Path) -> int:
+    """PreToolUse hook: surface memories anchored to the file being touched."""
+    try:
+        hook = json.load(sys.stdin)
+    except Exception:
+        return 0  # not hook-invoked; stay silent
+    tool_input = hook.get("tool_input") or {}
+    file_path = tool_input.get("file_path") or tool_input.get("notebook_path")
+    if not file_path:
+        return 0
+    try:
+        rel = str(Path(file_path).resolve().relative_to(repo))
+    except ValueError:
+        return 0  # file outside this repo
+    from legendary.index import memories_for_file
+    ids = memories_for_file(repo, rel)
+    if not ids:
+        return 0
+    session = hook.get("session_id") or "default"
+    cache = repo / ".legendary" / f".surfaced-{session}"
+    seen = set(cache.read_text().split()) if cache.exists() else set()
+    new_ids = [i for i in ids if i not in seen]
+    if not new_ids:
+        return 0
+    from legendary.stale import check_memory, worst_verdict
+    from legendary.store import load
+    lines = []
+    for mid in new_ids[:5]:
+        m = load(repo, mid)
+        if m is None or m.status != "active":
+            continue
+        verdict = worst_verdict(check_memory(repo, m.anchors))
+        flag = "" if verdict == "fresh" else f" [{verdict} - verify against current code]"
+        lines.append(f"- [{m.type}] {m.title}{flag}: {m.body[:300]}")
+    if not lines:
+        return 0
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(" ".join(sorted(seen | set(new_ids))))
+    print(json.dumps({
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "additionalContext": (
+                f"Legendary memories anchored to {rel}:\n" + "\n".join(lines)
+            ),
+        }
+    }))
+    return 0
+```
+
+Also update `_MCP_SNIPPET`'s hooks block to include the PreToolUse hook:
+
+```python
+  "hooks": {
+    "PreToolUse": [{"matcher": "Read|Edit|Write",
+      "hooks": [{"type": "command",
+      "command": "uvx legendary surface --repo %s"}]}],
+    "SessionStart": [{"hooks": [{"type": "command",
+      "command": "uvx legendary inject --repo %s"}]}],
+    "SessionEnd": [{"hooks": [{"type": "command",
+      "command": "uvx legendary extract --repo %s"}]}]
+  }
+```
+
+(and change the `_MCP_SNIPPET % (...)` call in `_cmd_init` to pass `repo` four
+times instead of three).
+
+- [ ] **Step 8: Implement — mcp_server.py**
+
+Add `supersedes: Optional[str] = None` to the `remember` tool signature and
+pass it through to `service.remember(...)`. Extend the docstring:
+`"Pass supersedes=<memory_id> when this memory replaces/corrects an existing one."`
+
+- [ ] **Step 9: Run the full suite**
+
+Run: `uv run pytest -q`
+Expected: all pass (test_polish.py 10 passed; existing tests unaffected — the
+new Memory fields are optional and excluded from markdown when None)
+
+Note: `.legendary/.surfaced-*` session caches must not be committed — add
+`.legendary/.surfaced-*` to the `.gitignore` entry written by `_cmd_init`
+(write both lines: `.legendary/index.db` and `.legendary/.surfaced-*`; keep the
+dedup check per-line). Update `test_init_twice_is_safe` accordingly if it
+asserts an exact count.
+
+- [ ] **Step 10: Commit**
+
+```bash
+git add -A
+git commit -m "feat: supersede links, transcript provenance, PreToolUse memory surfacing"
+```
+
+---
+
 ## Self-review notes (done at plan-writing time)
 
 - **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6), OSS infra: LICENSE/CI/release per spec 5b (Task 13). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).

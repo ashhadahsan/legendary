@@ -285,12 +285,47 @@ TDD throughout (pytest):
 
 ## 6. Roadmap after v1
 
-1. **v1.x** — extraction quality, more tree-sitter languages, Cursor/Codex hook
-   equivalents.
-2. **v2 (team)** — merge-friendly conventions, memory review workflow (PR
-   template), per-branch memory visibility.
-3. **v3** — optional local embeddings (e.g. sqlite-vec + small local model) for
-  semantic recall; context-rot tooling (decision-preserving compaction notes).
+Items marked (G) are adapted from Graphiti (getzep/graphiti, temporal KG
+memory); items marked (GF) from Graphify (Graphify-Labs/graphify, deterministic
+code knowledge graphs). Both reworked for a code-native, LLM-free-retrieval
+setting.
+
+1. **v1** (small additions) — `superseded_by: mem-xxxx` frontmatter link so
+   corrections point to replacements instead of losing history (G:
+   invalidate-don't-delete); `transcript` provenance ref on auto-extracted
+   memories (G: episode lineage); **PreToolUse hook**: when the agent reads or
+   edits a file with anchored memories, surface them automatically — no agent
+   cooperation needed, directly mitigates risk "agents don't call recall" (GF:
+   proactive file-read interception).
+2. **v1.x** — extraction quality, more tree-sitter languages;
+   `legendary install --platform <claude-code|cursor|codex|gemini|...>` writes
+   hook/rules/MCP config directly instead of printing snippets (GF: 20+
+   platform installer); `legendary harvest`: convert existing `# WHY:`/`# NOTE:`
+   comments into anchored decision memories, zero LLM (GF: inline-doc nodes);
+   `remember` returns "related existing memories" via same-anchor + FTS overlap
+   so agents supersede instead of duplicating (G: contradiction detection,
+   LLM-free); single-memory index upsert instead of full rebuild (G, GF:
+   incremental updates).
+3. **v2 (team)** — memory review workflow (PR template), per-branch memory
+   visibility; **PR impact comments**: GitHub Action that comments which
+   memories anchor to a PR's changed files and which go stale on merge (GF:
+   PR triage); **import-graph reranking**: boost memories anchored to files
+   that import / are imported by `files_in_focus`, using tree-sitter —
+   graph-distance reranking with no graph DB and no LLM (G: hybrid-search
+   graph traversal; the codebase is already the graph); per-module memory
+   digests for session-start injection (G: communities / evolving summaries);
+   `legendary report` HTML staleness heatmap + `[[wikilink]]` cross-refs making
+   `.legendary/memories/` an Obsidian-compatible vault (GF: visualization +
+   vault export).
+4. **v3** — optional local embeddings (e.g. sqlite-vec + small local model) for
+   semantic recall; context-rot tooling (decision-preserving compaction notes);
+   possible Graphify interop: anchor memories to Graphify node IDs instead of
+   duplicating structure extraction.
+
+Note: bi-temporality and point-in-time queries need no roadmap item — memories
+are git-tracked files, so ingestion history is `git log .legendary/` and
+point-in-time state is `git checkout`; anchors' `commit` + `content_hash`
+carry code-time validity.
 
 ## 7. Key risks
 
