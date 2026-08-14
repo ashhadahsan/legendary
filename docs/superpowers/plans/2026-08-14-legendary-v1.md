@@ -63,7 +63,7 @@ license = { text = "MIT" }
 dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
-    "mcp>=1.2",
+    "mcp>=2.0",
     "tree-sitter-language-pack>=0.7",
 ]
 
@@ -103,7 +103,12 @@ dist/
 - [ ] **Step 4: Verify environment**
 
 Run: `uv sync && uv run pytest --version`
-Expected: pytest 8.x prints; exit 0. (No tests yet — `uv run pytest` would exit 5 "no tests collected", that's fine.)
+Expected: a pytest 8+ version prints (9.x resolves today); exit 0. (No tests yet — `uv run pytest` would exit 5 "no tests collected", that's fine.)
+
+Also confirm the MCP major version is the one this plan targets:
+
+Run: `uv run python -c "from mcp.server.mcpserver import MCPServer; print('mcp 2.x ok')"`
+Expected: `mcp 2.x ok`. If this raises ImportError, the resolver picked mcp 1.x — Task 9 targets the 2.0 API (`mcp.server.mcpserver`), NOT the 1.x `mcp.server.fastmcp`.
 
 - [ ] **Step 5: Commit**
 
@@ -530,6 +535,18 @@ def test_resolve_and_hash_fills_fields(repo: Path):
 def test_resolve_and_hash_missing_file_raises(repo: Path):
     with pytest.raises(FileNotFoundError):
         resolve_and_hash(repo, Anchor(file="nope.py"))
+
+
+def test_resolve_and_hash_unresolvable_symbol_raises(repo: Path):
+    # write path is strict (spec 3.2) even though region_text is lenient
+    with pytest.raises(ValueError, match="line range"):
+        resolve_and_hash(repo, Anchor(file="src/sync/worker.py", symbol="DoesNotExist"))
+
+
+def test_region_text_out_of_range_lines_fall_back_to_file(repo: Path):
+    # file shrank below the stored range -> whole file, NOT None
+    text, _ = region_text(repo, Anchor(file="src/sync/worker.py", lines=(900, 950)))
+    assert "class SyncWorker" in text
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -627,9 +644,10 @@ def region_text(repo_root: Path, anchor: Anchor) -> Optional[tuple[str, tuple[in
         s, e = anchor.lines
         s = max(1, s)
         e = min(len(all_lines), e)
-        if s > e:
-            return None
-        return "\n".join(all_lines[s - 1 : e]), (s, e)
+        # If the range clamps to empty (the file shrank), fall through to the
+        # whole-file branch. None is reserved strictly for a missing file.
+        if s <= e:
+            return "\n".join(all_lines[s - 1 : e]), (s, e)
     return "\n".join(all_lines), (1, max(1, len(all_lines)))
 
 
@@ -645,7 +663,18 @@ def _head_commit(repo_root: Path) -> Optional[str]:
 
 
 def resolve_and_hash(repo_root: Path, anchor: Anchor) -> Anchor:
-    """Fill lines, commit, and content_hash at write time. Raises if file missing."""
+    """Fill lines, commit, and content_hash at write time.
+
+    Strict on the WRITE path (spec 3.2): the file must exist and a given symbol
+    must resolve, so the agent gets an actionable rejection instead of a silent
+    whole-file anchor. region_text stays lenient for recall-time re-resolution.
+    """
+    path = repo_root / anchor.file
+    if anchor.symbol and path.is_file() and _symbol_span(path, anchor.symbol) is None:
+        raise ValueError(
+            f"symbol {anchor.symbol!r} not found in {anchor.file} - "
+            "retry with a line range (lines: [start, end]) or drop the symbol"
+        )
     resolved = region_text(repo_root, anchor)
     if resolved is None:
         raise FileNotFoundError(f"anchor file not found: {anchor.file}")
@@ -662,7 +691,7 @@ def resolve_and_hash(repo_root: Path, anchor: Anchor) -> Anchor:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_anchor.py -v`
-Expected: 10 passed
+Expected: 12 passed
 
 - [ ] **Step 5: Commit**
 
@@ -870,6 +899,21 @@ def test_rebuild_is_idempotent(repo: Path):
     first = search(repo, "sqlite")
     rebuild(repo)
     assert search(repo, "sqlite") == first
+
+
+def test_search_auto_rebuilds_when_index_missing(repo: Path):
+    # the clone case: memories committed, index.db gitignored and absent
+    seed(repo)
+    from legendary.index import db_path
+    db_path(repo).unlink()
+    assert [h[0] for h in search(repo, "sqlite deadlock")] == ["mem-1"]
+
+
+def test_search_recovers_from_corrupt_index(repo: Path):
+    seed(repo)
+    from legendary.index import db_path
+    db_path(repo).write_bytes(b"this is definitely not a sqlite database")
+    assert [h[0] for h in search(repo, "sqlite deadlock")] == ["mem-1"]
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -887,7 +931,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from legendary.store import legendary_dir, load_all
+from legendary.store import legendary_dir, load_all, memories_dir
 
 _SCHEMA = """
 CREATE VIRTUAL TABLE IF NOT EXISTS mem_fts USING fts5(
@@ -909,8 +953,33 @@ def db_path(repo_root: Path) -> Path:
 def _connect(repo_root: Path) -> sqlite3.Connection:
     legendary_dir(repo_root).mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path(repo_root))
-    conn.executescript(_SCHEMA)
+    try:
+        conn.executescript(_SCHEMA)
+    except sqlite3.DatabaseError:
+        # Corrupt index: the markdown store is canonical, so throw it away and
+        # start clean. Deleting before reconnecting keeps rebuild() from
+        # recursing (rebuild calls _connect).
+        conn.close()
+        db_path(repo_root).unlink(missing_ok=True)
+        conn = sqlite3.connect(db_path(repo_root))
+        conn.executescript(_SCHEMA)
     return conn
+
+
+def _ensure_populated(repo_root: Path, conn: sqlite3.Connection) -> sqlite3.Connection:
+    """Auto-rebuild when the index is empty but memories exist on disk.
+
+    Covers the git-native case: a teammate clones the repo (memories committed,
+    index.db gitignored) and calls recall before ever running `init`.
+    """
+    count = conn.execute("SELECT COUNT(*) FROM mem_meta").fetchone()[0]
+    if count:
+        return conn
+    if not any(memories_dir(repo_root).glob("*.md")):
+        return conn
+    conn.close()
+    rebuild(repo_root)
+    return _connect(repo_root)
 
 
 def rebuild(repo_root: Path) -> int:
@@ -948,7 +1017,7 @@ def search(repo_root: Path, query: str, limit: int = 50) -> list[tuple[str, floa
     q = _fts_query(query)
     if not q:
         return []
-    conn = _connect(repo_root)
+    conn = _ensure_populated(repo_root, _connect(repo_root))
     try:
         rows = conn.execute(
             """
@@ -965,7 +1034,7 @@ def search(repo_root: Path, query: str, limit: int = 50) -> list[tuple[str, floa
 
 
 def files_for(repo_root: Path, memory_id: str) -> list[str]:
-    conn = _connect(repo_root)
+    conn = _ensure_populated(repo_root, _connect(repo_root))
     try:
         rows = conn.execute(
             "SELECT file FROM mem_anchors WHERE memory_id = ?", (memory_id,)
@@ -978,7 +1047,7 @@ def files_for(repo_root: Path, memory_id: str) -> list[str]:
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_index.py -v`
-Expected: 6 passed
+Expected: 8 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1066,6 +1135,27 @@ def test_k_limits_results(repo: Path):
         mk(repo, f"mem-{n}", f"topic note {n}", "the same topic body")
     rebuild(repo)
     assert len(recall(repo, "topic body", k=3, now=NOW)) == 3
+
+
+def test_config_toml_weights_are_applied(repo: Path):
+    mk(repo, "mem-1", "sync note one", "sync note", file="src/sync/worker.py")
+    mk(repo, "mem-2", "sync note two", "sync note")
+    rebuild(repo)
+    cfg = repo / ".legendary" / "config.toml"
+    cfg.write_text("[rank]\nw_overlap = 0.0\nw_recency = 0.0\n")
+    # focus boost disabled -> the anchored memory no longer wins on overlap
+    scores = {r["id"]: r["score"] for r in
+              recall(repo, "sync note", files_in_focus=["src/sync/worker.py"], now=NOW)}
+    assert scores["mem-1"] == scores["mem-2"]
+
+
+def test_malformed_config_falls_back_to_defaults(repo: Path):
+    mk(repo, "mem-1", "sync note one", "sync note", file="src/sync/worker.py")
+    mk(repo, "mem-2", "sync note two", "sync note")
+    rebuild(repo)
+    (repo / ".legendary" / "config.toml").write_text("[rank\nthis is not toml")
+    results = recall(repo, "sync note", files_in_focus=["src/sync/worker.py"], now=NOW)
+    assert results[0]["id"] == "mem-1"  # default overlap boost still applied
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1081,6 +1171,7 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'legendary.rank'`
 from __future__ import annotations
 
 import math
+import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -1089,8 +1180,25 @@ from legendary import index as idx
 from legendary.stale import check_memory, worst_verdict
 from legendary.store import load
 
-# default weights (see spec 3.4); overridable via .legendary/config.toml later
+# defaults (spec 3.4); overridden per-repo by [rank] in .legendary/config.toml
 WEIGHTS = {"fts": 2.0, "overlap": 1.5, "recency": 0.5, "stale": 1.0}
+
+
+def _load_weights(repo_root: Path) -> dict[str, float]:
+    """Merge [rank] w_* keys from config.toml over the defaults."""
+    weights = dict(WEIGHTS)
+    cfg = repo_root / ".legendary" / "config.toml"
+    if not cfg.is_file():
+        return weights
+    try:
+        rank_cfg = tomllib.loads(cfg.read_text()).get("rank", {})
+    except (tomllib.TOMLDecodeError, OSError):
+        return weights  # malformed config never breaks recall
+    for key in weights:
+        val = rank_cfg.get(f"w_{key}")
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            weights[key] = float(val)
+    return weights
 _STALE_PENALTY = {"fresh": 0.0, "stale": 0.5, "orphaned": 0.8}
 _RECENCY_HALF_LIFE_DAYS = 30.0
 
@@ -1104,6 +1212,7 @@ def recall(
 ) -> list[dict[str, Any]]:
     """Return top-k memories as dicts with staleness flags and anchor citations."""
     now = now or datetime.now(timezone.utc)
+    weights = _load_weights(repo_root)
     focus = set(files_in_focus or [])
     hits = idx.search(repo_root, query)
     if not hits:
@@ -1122,10 +1231,10 @@ def recall(
         age_days = max(0.0, (now - m.created).total_seconds() / 86400.0)
         recency = math.exp(-age_days / _RECENCY_HALF_LIFE_DAYS)
         score = (
-            WEIGHTS["fts"] * (rel / max_rel)
-            + WEIGHTS["overlap"] * overlap
-            + WEIGHTS["recency"] * recency
-            - WEIGHTS["stale"] * _STALE_PENALTY[worst]
+            weights["fts"] * (rel / max_rel)
+            + weights["overlap"] * overlap
+            + weights["recency"] * recency
+            - weights["stale"] * _STALE_PENALTY[worst]
         )
         results.append(
             {
@@ -1149,7 +1258,7 @@ def recall(
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_rank.py -v`
-Expected: 5 passed
+Expected: 7 passed
 
 - [ ] **Step 5: Commit**
 
@@ -1393,51 +1502,54 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
+
 from legendary.mcp_server import build_server
 
 
-def tools_of(server) -> dict:
-    tools = asyncio.run(server.list_tools())
-    return {t.name: t for t in tools}
+def call(server, name: str, args: dict):
+    """Invoke a tool and return its parsed JSON payload."""
+    result = asyncio.run(server.call_tool(name, args))
+    assert result.is_error is False, result.content[0].text
+    return json.loads(result.content[0].text)
 
 
 def test_all_five_tools_registered(repo: Path):
-    names = set(tools_of(build_server(repo)))
-    assert names == {"remember", "recall", "list_memories", "deprecate", "stale_report"}
+    tools = asyncio.run(build_server(repo).list_tools())
+    assert {t.name for t in tools} == {
+        "remember", "recall", "list_memories", "deprecate", "stale_report"
+    }
+
+
+def test_tool_schemas_expose_parameters(repo: Path):
+    tools = {t.name: t for t in asyncio.run(build_server(repo).list_tools())}
+    # mcp 2.x names this input_schema (1.x called it inputSchema)
+    props = tools["recall"].input_schema["properties"]
+    assert {"query", "files_in_focus", "k"} <= set(props)
+    assert tools["recall"].description  # docstring becomes the agent-facing doc
 
 
 def test_remember_then_recall_end_to_end(repo: Path):
     server = build_server(repo)
-
-    async def go():
-        saved = await server.call_tool("remember", {
-            "type": "episode", "title": "wal deadlock",
-            "body": "busy_timeout fixes it",
-            "anchors": [{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
-            "tags": ["sqlite"],
-        })
-        got = await server.call_tool("recall", {"query": "wal deadlock"})
-        return saved, got
-
-    saved, got = asyncio.run(go())
-    # FastMCP returns (content_blocks, structured_result)
-    payload = json.loads(got[0][0].text)
+    saved = call(server, "remember", {
+        "type": "episode", "title": "wal deadlock",
+        "body": "busy_timeout fixes it",
+        "anchors": [{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
+        "tags": ["sqlite"],
+    })
+    assert saved["id"].startswith("mem-")
+    payload = call(server, "recall", {"query": "wal deadlock"})
     assert payload[0]["title"] == "wal deadlock"
     assert payload[0]["staleness"] == "fresh"
 
 
-def test_remember_bad_anchor_returns_tool_error(repo: Path):
+def test_remember_bad_anchor_surfaces_error(repo: Path):
     server = build_server(repo)
-
-    async def go():
-        return await server.call_tool("remember", {
+    with pytest.raises(Exception, match="nope.py"):
+        asyncio.run(server.call_tool("remember", {
             "type": "episode", "title": "x", "body": "y",
             "anchors": [{"file": "nope.py"}],
-        })
-
-    import pytest
-    with pytest.raises(Exception, match="nope.py"):
-        asyncio.run(go())
+        }))
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -1449,20 +1561,20 @@ Expected: FAIL — `ModuleNotFoundError: No module named 'legendary.mcp_server'`
 
 ```python
 # src/legendary/mcp_server.py
-"""MCP server exposing legendary's memory tools over stdio."""
+"""MCP server exposing legendary's memory tools (mcp 2.x SDK)."""
 from __future__ import annotations
 
 import json
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from legendary import service
 
 
-def build_server(repo_root: Path) -> FastMCP:
-    mcp = FastMCP(
+def build_server(repo_root: Path) -> MCPServer:
+    mcp = MCPServer(
         "legendary",
         instructions=(
             "Code-anchored memory for this repository. Call `recall` BEFORE "
@@ -1523,16 +1635,44 @@ def build_server(repo_root: Path) -> FastMCP:
     return mcp
 
 
-def run(repo_root: Path) -> None:
-    build_server(repo_root).run()  # stdio transport
+def run(repo_root: Path, transport: str = "stdio", host: str = "127.0.0.1",
+        port: int = 8787) -> None:
+    """Serve over stdio (default) or stateless streamable HTTP.
+
+    Stateless HTTP holds no per-session server state, so any number of workers
+    can serve any request - the right shape for containers and shared team
+    deployments. legendary itself is already stateless: the repo on disk is the
+    only state.
+    """
+    server = build_server(repo_root)
+    if transport == "stdio":
+        server.run()
+        return
+    import anyio
+    anyio.run(
+        lambda: server.run_streamable_http_async(
+            host=host, port=port, stateless_http=True, json_response=True
+        )
+    )
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `uv run pytest tests/test_mcp_server.py -v`
-Expected: 3 passed
+Expected: 4 passed
 
-Note: if `server.call_tool` return shape differs in the installed `mcp` version (it returns either a list of content blocks or a `(blocks, structured)` tuple depending on version), adjust the unwrap in the test — check with `python -c "import mcp; print(mcp.__version__)"` and inspect the return value; the assertion targets stay the same.
+API notes (verified empirically against mcp 2.0.0 — do not "fix" these back to
+1.x spellings):
+
+- Import is `from mcp.server.mcpserver import MCPServer`. `mcp.server.fastmcp`
+  does NOT exist in 2.x; importing it raises ModuleNotFoundError and aborts
+  pytest collection for the whole suite.
+- `await server.call_tool(...)` returns a `CallToolResult` object with
+  `.content` (list of `TextContent`), `.is_error`, and `.structured_content`.
+  It is not a tuple and not subscriptable.
+- Tool listing exposes `.input_schema` (snake_case in 2.x, was `inputSchema`).
+- A tool raising `ValueError` surfaces as `ToolError` out of `call_tool` when
+  invoked directly, which is what `pytest.raises(Exception, match=...)` catches.
 
 - [ ] **Step 5: Commit**
 
@@ -1993,28 +2133,41 @@ def _cmd_inject(repo: Path, k: int) -> int:
     return 0
 
 
-def _cmd_mcp(repo: Path) -> int:
+def _cmd_mcp(repo: Path, transport: str, host: str, port: int) -> int:
     from legendary.mcp_server import run
-    run(repo)
+    run(repo, transport=transport, host=host, port=port)
     return 0
+
+
+def _add_repo(p: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """--repo must live on EVERY subparser, not the main parser.
+
+    argparse gives trailing options to the subparser, so `legendary init --repo X`
+    fails with 'unrecognized arguments' if --repo is only on the main parser.
+    """
+    p.add_argument("--repo", type=Path, default=Path.cwd(),
+                   help="target repository root (default: cwd)")
+    return p
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="legendary")
-    parser.add_argument("--repo", type=Path, default=Path.cwd(),
-                        help="target repository root (default: cwd)")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("init")
-    p_search = sub.add_parser("search")
+    _add_repo(sub.add_parser("init"))
+    p_search = _add_repo(sub.add_parser("search"))
     p_search.add_argument("query")
     p_search.add_argument("-k", type=int, default=5)
-    sub.add_parser("reindex")
-    sub.add_parser("doctor")
-    p_extract = sub.add_parser("extract")
+    _add_repo(sub.add_parser("reindex"))
+    _add_repo(sub.add_parser("doctor"))
+    p_extract = _add_repo(sub.add_parser("extract"))
     p_extract.add_argument("transcript", nargs="?", default=None)
-    p_inject = sub.add_parser("inject")
+    p_inject = _add_repo(sub.add_parser("inject"))
     p_inject.add_argument("-k", type=int, default=5)
-    sub.add_parser("mcp")
+    p_mcp = _add_repo(sub.add_parser("mcp"))
+    p_mcp.add_argument("--transport", choices=["stdio", "http"], default="stdio",
+                       help="stdio (default) or stateless streamable HTTP")
+    p_mcp.add_argument("--host", default="127.0.0.1")
+    p_mcp.add_argument("--port", type=int, default=8787)
 
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
@@ -2032,7 +2185,7 @@ def main(argv: list[str] | None = None) -> int:
         case "inject":
             return _cmd_inject(repo, args.k)
         case "mcp":
-            return _cmd_mcp(repo)
+            return _cmd_mcp(repo, args.transport, args.host, args.port)
     return 2
 
 
@@ -2040,7 +2193,10 @@ if __name__ == "__main__":
     raise SystemExit(main())
 ```
 
-Note: `--repo` is defined before the subcommand but the tests pass it after; argparse handles interspersed optionals with subparsers poorly — if `parse_args` errors, move `--repo` registration onto each subparser instead (add a `_add_repo(p)` helper that does `p.add_argument("--repo", type=Path, default=Path.cwd())` for every subparser, and read `args.repo` the same way). Keep the tests as written; adjust the implementation, not the tests.
+Note: the `_add_repo` per-subparser registration above is mandatory, not a
+stylistic choice — verified empirically that registering `--repo` on the main
+parser makes every CLI test exit 2 with "unrecognized arguments: --repo",
+because argparse hands trailing options to the subparser.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -2625,7 +2781,191 @@ git commit -m "feat: supersede links, transcript provenance, PreToolUse memory s
 
 ---
 
+### Task 15: Documentation site + contributor docs
+
+Answers "can it offer better tooling and docs" — docs are the adoption surface
+for an OSS tool, and for an MCP server the *tool descriptions* are literally the
+prompt the agent reads, so they get reviewed as docs too.
+
+**Files:**
+- Create: `mkdocs.yml`, `docs/index.md`, `docs/quickstart.md`, `docs/concepts.md`, `docs/tools.md`, `docs/cli.md`, `docs/faq.md`, `CONTRIBUTING.md`, `.github/workflows/docs.yml`
+- Modify: `pyproject.toml` (docs dependency group)
+
+- [ ] **Step 1: Add the docs dependency group**
+
+```toml
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+docs = ["mkdocs-material>=9.5"]
+```
+
+Run: `uv sync --group docs && uv run mkdocs --version`
+Expected: a mkdocs version prints; exit 0.
+
+- [ ] **Step 2: Create mkdocs.yml**
+
+```yaml
+site_name: legendary
+site_description: Code-anchored, staleness-aware memory for coding agents
+repo_url: https://github.com/ashhadahsan/legendary
+theme:
+  name: material
+  features: [navigation.sections, content.code.copy]
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/brightness-4, name: Light mode}
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts: concepts.md
+  - MCP tools: tools.md
+  - CLI: cli.md
+  - FAQ: faq.md
+```
+
+- [ ] **Step 3: Write the docs pages**
+
+`docs/index.md` — the problem (session amnesia, stale memories), the one-line
+pitch ("a memory that knows which code it's about, and knows when that code
+changed underneath it"), and the architecture + lifecycle mermaid diagrams
+copied verbatim from README.md (Task 12).
+
+`docs/quickstart.md` — `uvx legendary init`, paste the MCP config, first
+`remember`/`recall`, then edit the anchored function and show the memory turn
+stale. This is the "aha" demo; keep it under 2 minutes of reading.
+
+`docs/concepts.md` — anchors (file/symbol/lines/commit/content_hash), the four
+memory types with one example each, staleness verdicts and why stale memories
+are still returned (the *why* survives a refactor), and why the markdown store
+is canonical while index.db is disposable.
+
+`docs/tools.md` — one section per MCP tool: signature, every parameter, a real
+call and its JSON response, and when an agent should reach for it. Include the
+recommended CLAUDE.md snippet.
+
+`docs/cli.md` — one section per command (`init`, `search`, `reindex`, `doctor`,
+`extract`, `inject`, `surface`, `mcp`), each with a real invocation and its
+output. Document `mcp --transport http --host --port` (stateless streamable
+HTTP) alongside the default stdio.
+
+`docs/faq.md` — answer at minimum: Does it send my code anywhere? (No.) Do I
+need an API key? (No, except optional `extract`.) How is this different from
+mem0/Zep? (They are code-blind; memories never go stale.) How is it different
+from Serena/CodeGraph/Graphify? (They model code structure; they do not
+remember decisions or failed attempts.) Should memories be committed? (Yes —
+that is the team-sharing mechanism.) What happens on merge conflicts? (One file
+per memory, so conflicts are rare and legible.)
+
+- [ ] **Step 4: Create CONTRIBUTING.md**
+
+Cover: `uv sync` setup, `uv run pytest` and `uv run ruff check src tests` as the
+gate, TDD expectation (test first, watch it fail, then implement), the module
+map from this plan's File structure section, and the rule that
+`.legendary/memories/*.md` is the canonical store so any change must keep the
+markdown round-trip lossless.
+
+- [ ] **Step 5: Create .github/workflows/docs.yml**
+
+```yaml
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --group docs
+      - run: uv run mkdocs build --strict
+      - uses: actions/upload-pages-artifact@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          path: site
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - uses: actions/deploy-pages@v4
+
+```
+
+`--strict` fails the build on broken links, so docs rot is caught in CI.
+
+- [ ] **Step 6: Verify the docs build**
+
+Run: `uv run mkdocs build --strict`
+Expected: "INFO - Documentation built in ..."; exit 0, no warnings.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add mkdocs.yml docs/ CONTRIBUTING.md .github/workflows/docs.yml pyproject.toml uv.lock
+git commit -m "docs: mkdocs-material site, contributor guide, docs CI"
+```
+
+---
+
 ## Self-review notes (done at plan-writing time)
 
 - **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6), OSS infra: LICENSE/CI/release per spec 5b (Task 13). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).
-- **Known flex points:** `mcp` SDK `call_tool` return shape (Task 9 note) and argparse `--repo` placement (Task 11 note) — both have in-plan remedies that keep tests unchanged.
+## Post-audit revisions (adversarial audit, 2026-08-14)
+
+A 4-lens adversarial audit (spec coverage, cross-task consistency, real-API
+executability, test-execution simulation) with independent refutation of each
+finding produced these corrections. All were empirically verified by running the
+code, not reasoned about:
+
+1. **mcp 2.0 port (was fatal).** `mcp>=1.2` resolves to mcp 2.0.0 where
+   `mcp.server.fastmcp` does not exist — the import error aborted pytest
+   collection for the *entire* suite. Task 1 now pins `mcp>=2.0` and Task 9 is
+   rewritten against the verified 2.x API (`MCPServer`, `CallToolResult`,
+   `.input_schema`), plus stateless streamable-HTTP transport.
+2. **Anchor line-fallback bug (was a guaranteed test failure).** `region_text`
+   returned `None` when a stored line range clamped empty (file shrank),
+   yielding `orphaned` where Task 5 asserts `stale`. Now falls through to the
+   whole-file branch; `None` is reserved for a missing file.
+3. **Write-time symbol validation (spec 3.2/4 gap).** A typo'd symbol silently
+   became a whole-file anchor. `resolve_and_hash` now raises an actionable
+   ValueError; `region_text` stays lenient for recall-time re-resolution.
+4. **Index auto-rebuild (spec 4 gap).** A cloned repo (memories committed,
+   index.db gitignored) returned empty recalls, and a corrupt index crashed.
+   `_connect` now recovers from corruption and `_ensure_populated` rebuilds
+   from the canonical markdown on read.
+5. **config.toml weights were inert (spec 3.4 gap).** `init` wrote weights that
+   nothing read. `rank._load_weights` now loads `[rank]` via stdlib `tomllib`
+   with defaults on missing/malformed config.
+6. **argparse `--repo` placement.** Registering it on the main parser fails
+   100% of the time with trailing `--repo`; the per-subparser `_add_repo`
+   helper is now the primary implementation, not a contingency note.
+7. **pytest version expectation** corrected (8+ / 9.x resolves today).
+
+Refuted and deliberately not changed: 6 findings, including a claimed
+`%`-formatting injection in `extract._PROMPT` (Python only scans the left
+operand, so transcript content containing `%s` is inert).
+
+Test-count gates updated accordingly: Task 4 → 12, Task 6 → 8, Task 7 → 7,
+Task 9 → 4.

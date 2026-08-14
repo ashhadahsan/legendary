@@ -234,7 +234,14 @@ FastMCP (official `mcp` Python SDK). Tools:
 | `deprecate` | id, reason | Soft-delete (status: deprecated, reason recorded) |
 | `stale_report` | — | All stale/orphaned memories |
 
-Run: `uvx legendary mcp` (stdio). One-line install in any MCP client.
+Built on the **mcp 2.x SDK** (`mcp.server.mcpserver.MCPServer` — note `fastmcp`
+was removed in 2.0). Two transports:
+
+- `uvx legendary mcp` — stdio (default; what MCP clients launch)
+- `uvx legendary mcp --transport http` — **stateless** streamable HTTP
+  (`stateless_http=True`), for containers and shared team deployments. legendary
+  is inherently stateless: the repo on disk is the only state, so any worker can
+  serve any request.
 
 ### 3.6 CLI (`cli/`)
 
@@ -277,6 +284,11 @@ TDD throughout (pytest):
 ## 5b. Repo infrastructure (OSS hygiene)
 
 - **MIT LICENSE** file.
+- **Docs site:** mkdocs-material, built with `--strict` in CI and deployed to
+  GitHub Pages — quickstart, concepts, per-tool and per-command reference, FAQ
+  positioning against mem0/Zep and Serena/CodeGraph/Graphify. Plus
+  `CONTRIBUTING.md`. For an MCP server the tool descriptions are the prompt the
+  agent reads, so they are reviewed as documentation, not comments.
 - **CI (GitHub Actions):** on push/PR — `uv sync` + `pytest` on a matrix of
   {ubuntu, macos} × {3.12, 3.13}; `ruff check` for lint. Must pass before merge.
 - **Release (GitHub Actions):** on version tag `v*` — build with `uv build`,
