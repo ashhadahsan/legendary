@@ -2932,6 +2932,332 @@ git commit -m "docs: mkdocs-material site, contributor guide, docs CI"
 ## Self-review notes (done at plan-writing time)
 
 - **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6), OSS infra: LICENSE/CI/release per spec 5b (Task 13). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).
+### Task 16: Benchmark — head-to-head vs Graphify and baseline
+
+Publishes the numbers that justify the tool. Graphify's traction came partly
+from publishing hard metrics; we do the same, honestly.
+
+**Design principle:** legendary and Graphify optimize different things
+(structure discovery vs. decision/failure memory), so the benchmark runs FOUR
+arms and reports all of them, including the case where the combination wins.
+Claims in the README must match whatever the numbers say.
+
+**Files:**
+- Create: `bench/README.md`, `bench/scenario/` (fixture repo), `bench/run_bench.py`, `bench/report.py`, `docs/benchmark.md`, `docs/comparison.md`
+
+- [ ] **Step 1: Pre-register the methodology in bench/README.md**
+
+Write this BEFORE running anything, and commit it, so results cannot be
+retro-fitted to a conclusion:
+
+```markdown
+# legendary benchmark
+
+## Question
+Does code-anchored memory reduce tokens-to-completion and prevent repeated
+failed approaches on multi-session tasks?
+
+## Arms (all identical except MCP config)
+1. `baseline`  - no memory, no graph tooling
+2. `graphify`  - Graphify MCP only
+3. `legendary` - legendary MCP only
+4. `both`      - Graphify + legendary
+
+## Protocol
+Each trial is TWO sessions with separate context (the amnesia boundary):
+- Session 1: fix bug A in `sync/worker.py`. A plausible-looking fix (wrapping
+  retries in a transaction) deadlocks under SQLite WAL; the working fix is
+  `busy_timeout`. The agent discovers this the hard way.
+- Session 2 (fresh context): fix bug B, the same class of bug in
+  `sync/reporter.py`. An agent with no memory of session 1 typically retries
+  the transaction approach.
+
+## Pre-registered metrics
+- `tokens_total` = input + cache_creation + cache_read + output, both sessions
+- `cost_usd`, `duration_s`, `num_turns`
+- `repeated_failure` (bool) - did session 2 introduce the known-bad pattern?
+  Detected deterministically by grepping the final diff for
+  `BEGIN TRANSACTION` / `conn.execute("BEGIN` inside the retry path.
+- `correct` (bool) - does `pytest` pass in the scenario repo afterwards?
+
+## Rules
+- N >= 5 trials per arm; report median and full range, never a single run.
+- Identical prompts across arms; prompts are fixed in run_bench.py and committed.
+- ALL runs are published in `bench/results/*.json`, including failures and runs
+  where legendary loses. No run is discarded after the fact.
+- Author bias disclosed: we wrote legendary. Anyone can re-run this.
+```
+
+- [ ] **Step 2: Build the scenario fixture repo**
+
+Create `bench/scenario/` as a small, self-contained python package with a
+deliberate concurrency bug in two sibling modules:
+
+- `sync/worker.py` — writes rows in a retry loop; under WAL, wrapping the retry
+  in an explicit transaction deadlocks. Working fix: `PRAGMA busy_timeout`.
+- `sync/reporter.py` — same bug class, different surface (bug B).
+- `tests/test_sync.py` — a concurrency test that fails while the bug is present
+  and passes once fixed, for BOTH modules.
+- `README.md` — deliberately does NOT mention the WAL/busy_timeout gotcha; that
+  knowledge only exists in what the agent learns during session 1.
+
+Verify the fixture is a valid scenario before benchmarking anything:
+
+Run: `cd bench/scenario && uv run pytest -q`
+Expected: FAIL — the concurrency tests fail while the bugs are present. (If they
+pass, the scenario is broken and every benchmark number would be meaningless.)
+
+- [ ] **Step 3: Write bench/run_bench.py**
+
+```python
+#!/usr/bin/env python3
+"""Run the legendary benchmark across four arms. Publishes raw JSON per trial."""
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import time
+from pathlib import Path
+
+BENCH = Path(__file__).parent
+SCENARIO = BENCH / "scenario"
+RESULTS = BENCH / "results"
+
+SESSION_1 = (
+    "The concurrency test for sync/worker.py fails. Diagnose and fix it so "
+    "`pytest tests/test_sync.py -k worker` passes. Do not modify the tests."
+)
+SESSION_2 = (
+    "The concurrency test for sync/reporter.py fails. Diagnose and fix it so "
+    "`pytest tests/test_sync.py -k reporter` passes. Do not modify the tests."
+)
+
+# the plausible-but-wrong approach session 1 teaches you to avoid
+BAD_PATTERN = "BEGIN TRANSACTION"
+
+ARMS = {
+    "baseline": [],
+    "graphify": ["graphify"],
+    "legendary": ["legendary"],
+    "both": ["graphify", "legendary"],
+}
+
+
+def mcp_config(tools: list[str], repo: Path) -> dict:
+    servers = {}
+    if "legendary" in tools:
+        servers["legendary"] = {
+            "command": "uvx",
+            "args": ["legendary", "mcp", "--repo", str(repo)],
+        }
+    if "graphify" in tools:
+        servers["graphify"] = {
+            "command": "python",
+            "args": ["-m", "graphify.serve"],
+            "cwd": str(repo),
+        }
+    return {"mcpServers": servers}
+
+
+def run_session(repo: Path, prompt: str, config_path: Path | None) -> dict:
+    cmd = ["claude", "-p", prompt, "--output-format", "json",
+           "--permission-mode", "acceptEdits", "--max-turns", "40"]
+    if config_path is not None:
+        cmd += ["--mcp-config", str(config_path), "--strict-mcp-config"]
+    started = time.monotonic()
+    proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=1800)
+    elapsed = time.monotonic() - started
+    try:
+        data = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        return {"error": proc.stdout[-2000:] or proc.stderr[-2000:], "duration_s": elapsed}
+    u = data.get("usage", {})
+    return {
+        "tokens_total": sum(int(u.get(k, 0) or 0) for k in (
+            "input_tokens", "cache_creation_input_tokens",
+            "cache_read_input_tokens", "output_tokens")),
+        "cost_usd": data.get("total_cost_usd"),
+        "num_turns": data.get("num_turns"),
+        "duration_s": round(elapsed, 1),
+        "is_error": data.get("is_error"),
+    }
+
+
+def tests_pass(repo: Path) -> bool:
+    proc = subprocess.run(["uv", "run", "pytest", "-q"], cwd=repo,
+                          capture_output=True, text=True, timeout=600)
+    return proc.returncode == 0
+
+
+def repeated_failure(repo: Path) -> bool:
+    """Did the agent reintroduce the approach session 1 proved wrong?"""
+    diff = subprocess.run(["git", "diff"], cwd=repo, capture_output=True,
+                          text=True).stdout
+    return BAD_PATTERN.lower() in diff.lower()
+
+
+def trial(arm: str, index: int, workdir: Path) -> dict:
+    repo = workdir / f"{arm}-{index}"
+    shutil.copytree(SCENARIO, repo)
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "scenario"], cwd=repo, check=True)
+
+    tools = ARMS[arm]
+    config_path = None
+    if tools:
+        config_path = repo / ".bench-mcp.json"
+        config_path.write_text(json.dumps(mcp_config(tools, repo)))
+        if "legendary" in tools:
+            subprocess.run(["uvx", "legendary", "init", "--repo", str(repo)],
+                           check=True, capture_output=True)
+
+    s1 = run_session(repo, SESSION_1, config_path)
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(["git", "commit", "-qm", "session1", "--allow-empty"],
+                   cwd=repo, check=True)
+    s2 = run_session(repo, SESSION_2, config_path)
+
+    return {
+        "arm": arm,
+        "trial": index,
+        "session_1": s1,
+        "session_2": s2,
+        "tokens_total": (s1.get("tokens_total", 0) or 0) + (s2.get("tokens_total", 0) or 0),
+        "cost_usd": round((s1.get("cost_usd") or 0) + (s2.get("cost_usd") or 0), 4),
+        "duration_s": round((s1.get("duration_s") or 0) + (s2.get("duration_s") or 0), 1),
+        "repeated_failure": repeated_failure(repo),
+        "correct": tests_pass(repo),
+    }
+
+
+def main() -> int:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
+    ap.add_argument("-n", "--trials", type=int, default=5)
+    ap.add_argument("--workdir", type=Path, required=True,
+                    help="scratch directory for trial repos")
+    args = ap.parse_args()
+
+    RESULTS.mkdir(exist_ok=True)
+    args.workdir.mkdir(parents=True, exist_ok=True)
+    for arm in args.arms:
+        for i in range(args.trials):
+            print(f"running {arm} trial {i + 1}/{args.trials}...", flush=True)
+            record = trial(arm, i, args.workdir)
+            out = RESULTS / f"{arm}-{i}.json"
+            out.write_text(json.dumps(record, indent=2))
+            print(f"  tokens={record['tokens_total']} "
+                  f"repeated_failure={record['repeated_failure']} "
+                  f"correct={record['correct']}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+- [ ] **Step 4: Write bench/report.py**
+
+```python
+#!/usr/bin/env python3
+"""Aggregate bench/results/*.json into a markdown table. Reports every run."""
+from __future__ import annotations
+
+import json
+import statistics
+from pathlib import Path
+
+RESULTS = Path(__file__).parent / "results"
+ARM_ORDER = ["baseline", "graphify", "legendary", "both"]
+
+
+def main() -> int:
+    runs: dict[str, list[dict]] = {}
+    for path in sorted(RESULTS.glob("*.json")):
+        rec = json.loads(path.read_text())
+        runs.setdefault(rec["arm"], []).append(rec)
+    if not runs:
+        print("no results yet - run run_bench.py first")
+        return 1
+
+    print("| arm | n | median tokens | median cost | repeated failure | correct |")
+    print("|---|---|---|---|---|---|")
+    for arm in ARM_ORDER:
+        rs = runs.get(arm)
+        if not rs:
+            continue
+        toks = [r["tokens_total"] for r in rs]
+        costs = [r["cost_usd"] for r in rs]
+        rf = sum(1 for r in rs if r["repeated_failure"])
+        ok = sum(1 for r in rs if r["correct"])
+        print(f"| {arm} | {len(rs)} | {statistics.median(toks):,.0f} "
+              f"(range {min(toks):,}-{max(toks):,}) | "
+              f"${statistics.median(costs):.2f} | {rf}/{len(rs)} | {ok}/{len(rs)} |")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+```
+
+- [ ] **Step 5: Smoke-test the harness with one cheap trial**
+
+Run: `uv run python bench/run_bench.py --arms baseline -n 1 --workdir /tmp/legbench`
+Expected: prints `running baseline trial 1/1...` then a line with
+`tokens=<number> repeated_failure=<bool> correct=<bool>`, and
+`bench/results/baseline-0.json` exists with non-null `tokens_total`.
+
+If `tokens_total` is 0 or the JSON contains an `error` key, fix the harness
+before running the full matrix — a broken harness silently produces
+publishable-looking garbage.
+
+- [ ] **Step 6: Run the full matrix**
+
+Run: `uv run python bench/run_bench.py -n 5 --workdir /tmp/legbench`
+Then: `uv run python bench/report.py`
+
+Expected: a 4-row table. Note this costs real API credits (4 arms x 5 trials x
+2 sessions = 40 agent sessions); run it deliberately, not in CI.
+
+- [ ] **Step 7: Write docs/benchmark.md and docs/comparison.md**
+
+`docs/benchmark.md` — paste the generated table, link the raw
+`bench/results/*.json`, restate the pre-registered methodology, and state the
+conclusion the numbers actually support. If legendary does not win a metric,
+say so plainly and explain why; a benchmark that only ever flatters its author
+is worth nothing.
+
+`docs/comparison.md` — a positioning matrix, framed as complementary rather
+than competitive:
+
+```markdown
+| | Graphify | mem0 / Zep | legendary |
+|---|---|---|---|
+| Models code structure | yes (36 grammars) | no | minimal (anchors only) |
+| Remembers decisions | no | yes | yes |
+| Remembers failed attempts | no | partly | yes (episode type) |
+| Memories tied to code entities | n/a | no | yes (file/symbol/commit) |
+| Detects when a memory goes stale | n/a | no | yes (content hash) |
+| Team-shared via git | graph committed | no (service) | yes (markdown in repo) |
+| Retrieval needs an LLM | no | embeddings | no (FTS5) |
+| Runs fully local | yes | no / partly | yes |
+
+Graphify answers "what is this code?"; legendary answers "what do we already
+know about it, and is that still true?" Running both is the recommended setup.
+```
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add bench docs/benchmark.md docs/comparison.md
+git commit -m "bench: four-arm benchmark vs graphify and baseline, with pre-registered methodology"
+```
+
+---
+
 ## Post-audit revisions (adversarial audit, 2026-08-14)
 
 A 4-lens adversarial audit (spec coverage, cross-task consistency, real-API
