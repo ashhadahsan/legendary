@@ -2125,6 +2125,57 @@ re-resolved (symbols may move) and re-hashed. Changed hash => `stale`;
 missing file/region => `orphaned`. Stale memories still surface - the *why*
 often survives a refactor - but ranked lower and clearly flagged.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph host["MCP host - Claude Code / Cursor / Codex / any"]
+        agent["Coding agent"]
+    end
+
+    subgraph legendary["legendary (uvx legendary)"]
+        mcp["MCP server<br/>remember - recall - list_memories<br/>deprecate - stale_report"]
+        cli["CLI<br/>init - search - reindex - doctor<br/>extract - inject"]
+        svc["service layer"]
+        subgraph core["core"]
+            store["markdown store"]
+            index["SQLite FTS5 index"]
+            anchor["anchor resolve + hash"]
+            stale["staleness verdicts"]
+            rank["weighted ranking"]
+        end
+    end
+
+    subgraph repodir[".legendary/ in your repo"]
+        md["memories/*.md - committed"]
+        db["index.db - gitignored"]
+    end
+
+    agent -- "MCP tools (stdio)" --> mcp
+    agent -. "session hooks" .-> cli
+    mcp --> svc
+    cli --> svc
+    svc --> store
+    svc --> index
+    svc --> anchor
+    svc --> stale
+    svc --> rank
+    store --> md
+    index --> db
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> fresh: remember() - region hashed at commit X
+    fresh --> stale: anchored region edited
+    stale --> fresh: memory re-anchored
+    fresh --> orphaned: file / symbol deleted
+    stale --> orphaned: file / symbol deleted
+    fresh --> deprecated: deprecate(reason)
+    stale --> deprecated: deprecate(reason)
+    orphaned --> deprecated: doctor cleanup
+```
+
 ## License
 
 MIT
@@ -2288,6 +2339,5 @@ git commit -m "chore: MIT license, CI matrix, PyPI trusted-publishing release"
 
 ## Self-review notes (done at plan-writing time)
 
-- **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).
+- **Spec coverage:** storage format (Task 2/3), anchoring (Task 4), staleness (Task 5), FTS index (Task 6), ranking weights (Task 7), all five MCP tools + instructions (Task 9), CLI incl. init scaffold/gitignore/config.toml/MCP+hook snippets (Task 11), extraction with `auto-extract` provenance + graceful `claude` absence (Task 10), error handling spec §4 (malformed files Task 3, bad anchors Task 8, not-a-git-repo Task 11, index rebuild Task 6), reindex idempotence property (Task 6), OSS infra: LICENSE/CI/release per spec 5b (Task 13). Config weights are *written* by init but ranking reads defaults in v1 — loading them from config.toml is deferred to v1.x (YAGNI; documented here so it isn't a surprise).
 - **Known flex points:** `mcp` SDK `call_tool` return shape (Task 9 note) and argparse `--repo` placement (Task 11 note) — both have in-plan remedies that keep tests unchanged.
-```

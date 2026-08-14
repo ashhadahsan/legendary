@@ -56,31 +56,103 @@ delivered as an MCP server + CLI. Its unit of value: a *memory* that is
 
 ## 3. Architecture
 
+```mermaid
+flowchart TB
+    subgraph host["MCP host — Claude Code / Cursor / Codex / any"]
+        agent["Coding agent"]
+    end
+
+    subgraph legendary["legendary  (Python 3.12 · uvx legendary)"]
+        mcp["mcp_server.py<br/>remember · recall · list_memories<br/>deprecate · stale_report"]
+        cli["cli.py<br/>init · search · reindex · doctor<br/>extract · inject · mcp"]
+        svc["service.py<br/>shared application layer"]
+        ext["extract.py<br/>transcript → memory candidates"]
+        subgraph core["core"]
+            store["store.py<br/>canonical markdown store"]
+            index["index.py<br/>SQLite FTS5 index"]
+            anchor["anchor.py<br/>symbol/lines resolution + hashing"]
+            stale["stale.py<br/>recall-time verdicts"]
+            rank["rank.py<br/>weighted scoring"]
+        end
+    end
+
+    subgraph repodir[".legendary/ inside the target repo"]
+        md["memories/*.md — committed, canonical"]
+        db["index.db — gitignored, rebuildable"]
+        cfg["config.toml — committed"]
+    end
+
+    agent -- "MCP tools (stdio)" --> mcp
+    agent -. "SessionStart inject /<br/>SessionEnd extract hooks" .-> cli
+    mcp --> svc
+    cli --> svc
+    cli --> ext
+    ext -- "claude -p (headless)" --> svc
+    svc --> store
+    svc --> index
+    svc --> anchor
+    svc --> stale
+    svc --> rank
+    store --> md
+    index --> db
+    anchor -- "read region · git HEAD" --> wt["working tree + git"]
 ```
-┌─────────────────────────────────────────────────────┐
-│ Coding agent (Claude Code / Cursor / any MCP host)  │
-│   MCP tools: remember, recall, list_memories,       │
-│              deprecate, stale_report                │
-│   Hooks (Claude Code): SessionStart inject,         │
-│                        SessionEnd extract           │
-└──────────────────────┬──────────────────────────────┘
-                       │
-              legendary (Python 3.12, uv)
-                       │
-   ┌───────────────────┼──────────────────────┐
-   │ core/             │                      │
-   │  store.py   canonical markdown store     │
-   │  index.py   derived SQLite FTS5 index    │
-   │  anchor.py  file/symbol/hash anchoring   │
-   │  stale.py   recall-time staleness check  │
-   │  rank.py    recall ranking               │
-   │  extract.py transcript → memory candidates│
-   └───────────────────┬──────────────────────┘
-                       │
-        .legendary/            (in target repo)
-          memories/*.md        committed, canonical
-          index.db             gitignored, rebuildable
-          config.toml          committed
+
+### 3.0 Flow diagrams
+
+**Write path — `remember`:**
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant M as MCP: remember
+    participant An as anchor.py
+    participant St as store.py
+    participant Ix as index.py
+
+    A->>M: remember(type, title, body, anchors, tags)
+    M->>An: resolve symbol → span · normalize · hash · git HEAD
+    An-->>M: Anchor{file, symbol, lines, commit, sha256}
+    M->>St: write .legendary/memories/mem-xxxx.md
+    M->>Ix: rebuild FTS5 index
+    M-->>A: {id, resolved anchors}
+```
+
+**Read path — `recall` with staleness:**
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant M as MCP: recall
+    participant Ix as index.py (FTS5)
+    participant S as stale.py
+    participant R as rank.py
+
+    A->>M: recall("wal deadlock", files_in_focus=[worker.py])
+    M->>Ix: search(sanitized query)
+    Ix-->>M: [(memory_id, relevance)]
+    loop each hit
+        M->>S: re-resolve anchor · rehash region
+        S-->>M: fresh | stale | orphaned
+    end
+    M->>R: score = w·fts + w·focus_overlap + w·recency − w·stale_penalty
+    R-->>A: top-k, flagged "⚠ stale — code changed since 8fa2c31"
+```
+
+**Memory lifecycle** (staleness is *computed at recall time*, never stored — this
+diagram shows the effective states a memory moves through):
+
+```mermaid
+stateDiagram-v2
+    [*] --> fresh: remember() — region hashed at commit X
+    fresh --> stale: anchored region edited
+    stale --> fresh: memory re-anchored to new code
+    fresh --> orphaned: file / symbol deleted
+    stale --> orphaned: file / symbol deleted
+    fresh --> deprecated: deprecate(reason)
+    stale --> deprecated: deprecate(reason)
+    orphaned --> deprecated: doctor cleanup
+    deprecated --> [*]: soft-deleted, reason kept
 ```
 
 ### 3.1 Storage (`core/store.py`)
