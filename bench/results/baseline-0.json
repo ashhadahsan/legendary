@@ -1,0 +1,23 @@
+{
+  "arm": "baseline",
+  "trial": 0,
+  "session_1": {
+    "tokens_total": 355446,
+    "cost_usd": 0.43302389999999996,
+    "num_turns": 12,
+    "duration_s": 35.2,
+    "is_error": false
+  },
+  "session_2": {
+    "tokens_total": 753348,
+    "cost_usd": 0.5183211,
+    "num_turns": 19,
+    "duration_s": 109.6,
+    "is_error": false
+  },
+  "tokens_total": 1108794,
+  "cost_usd": 0.9513,
+  "duration_s": 144.8,
+  "repeated_failure": false,
+  "correct": true
+}

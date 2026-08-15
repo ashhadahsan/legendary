@@ -53,6 +53,46 @@ deliberately excluded from CI.
 
 ## Results
 
-Not yet run. When it is, the generated table and every raw
-`bench/results/*.json` - including runs where legendary loses - will be
-published here unedited. See `bench/README.md` for the full pre-registration.
+### Preliminary smoke run (n=1 per arm) - NOT a claim
+
+One trial per arm, run to validate the harness. **This is not statistically
+meaningful** and should not be quoted as evidence. The pre-registered protocol
+requires n>=5 with median and range; those numbers will replace this section.
+
+| metric | baseline | legendary |
+|---|---:|---:|
+| tokens total | 1,108,794 | 864,798 (-22%) |
+| wall clock | 144.8 s | 96.2 s (-34%) |
+| cost | $0.95 | $1.04 (**+9%**) |
+| repeated_failure | False | False |
+| correct | True | True |
+
+Per-session split, which is where the predicted mechanism shows up:
+
+| | baseline | legendary |
+|---|---:|---:|
+| session 1 | 355,446 | 461,013 (pays to write memory) |
+| session 2 | 753,348 | **403,785** |
+
+Baseline's second session cost roughly twice its first, re-deriving what it had
+just worked out. legendary's second session used ~46% fewer tokens than
+baseline's.
+
+### Honest caveats
+
+1. **n=1 proves nothing.** Agent runs vary widely - baseline's own two sessions
+   differed by 2x.
+2. **Cost rose 9% despite 22% fewer tokens.** The token mix shifted toward
+   uncached input. "Fewer tokens and faster" is supportable so far; "cheaper"
+   is not.
+3. **`repeated_failure` did not discriminate** (False for both arms). The
+   scenario let agents fix the bug with `sqlite3.connect(timeout=...)`, a
+   legitimate alternative sitting right next to the intended `BEGIN
+   TRANSACTION` trap, so neither arm was tempted into it. That is a flaw in the
+   fixture design, not a finding about the tools. A future revision needs a bug
+   whose *obvious* fix is genuinely wrong. The metric stays in the
+   pre-registration and is reported as "did not discriminate" rather than
+   dropped.
+
+Raw per-trial JSON for every run, including this one, is committed under
+`bench/results/`. See `bench/README.md` for the pre-registration.
