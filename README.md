@@ -15,9 +15,10 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ashhadahsan/legendary/actions/workflows/ci.yml"><img src="https://github.com/ashhadahsan/legendary/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
-  <a href="https://pypi.org/project/legendary-mcp/"><img src="https://img.shields.io/pypi/v/legendary-mcp.svg" alt="PyPI"></a>
-  <img src="https://img.shields.io/pypi/pyversions/legendary-mcp.svg" alt="Python versions">
+  <a href="https://github.com/ashhadahsan/legendary/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/ashhadahsan/legendary/ci.yml?branch=main&logo=github&label=CI" alt="CI"></a>
+  <a href="https://pypi.org/project/legendary-mcp/"><img src="https://img.shields.io/pypi/v/legendary-mcp.svg?logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
+  <a href="https://pypi.org/project/legendary-mcp/"><img src="https://img.shields.io/pypi/pyversions/legendary-mcp.svg?logo=python&logoColor=white" alt="Python versions"></a>
+  <a href="https://ashhadahsan.github.io/legendary/"><img src="https://img.shields.io/badge/docs-live-brightgreen?logo=materialformkdocs&logoColor=white" alt="Docs"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
 </p>
 
