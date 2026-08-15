@@ -8,10 +8,18 @@ from pathlib import Path
 from legendary.models import Memory
 from legendary.store import legendary_dir, load_all, memories_dir
 
+# Bump when _SCHEMA changes: a stale index is dropped and rebuilt from markdown.
+_SCHEMA_VERSION = 2
+
 _SCHEMA = """
+-- porter stemming: an agent searching "deadlock" must find a memory that says
+-- "deadlocked", and "transactions" must find "transaction". Without it FTS5
+-- matches exact terms only and silently loses memories to word-form drift.
 CREATE VIRTUAL TABLE IF NOT EXISTS mem_fts USING fts5(
-    id UNINDEXED, title, body, tags
+    id UNINDEXED, title, body, tags,
+    tokenize = 'porter unicode61'
 );
+CREATE TABLE IF NOT EXISTS schema_meta (version INTEGER);
 CREATE TABLE IF NOT EXISTS mem_meta (
     id TEXT PRIMARY KEY, type TEXT, status TEXT, created TEXT
 );
@@ -43,6 +51,25 @@ def _connect(repo_root: Path) -> sqlite3.Connection:
         db_path(repo_root).unlink(missing_ok=True)
         conn = sqlite3.connect(db_path(repo_root))
         conn.executescript(_SCHEMA)
+    return _migrate(conn)
+
+
+def _migrate(conn: sqlite3.Connection) -> sqlite3.Connection:
+    """Drop and recreate the index when the schema version has moved on.
+
+    Safe because the markdown store is canonical: the emptied index is
+    repopulated by _ensure_populated on the next read.
+    """
+    row = conn.execute("SELECT version FROM schema_meta").fetchone()
+    if row and row[0] == _SCHEMA_VERSION:
+        return conn
+    with conn:
+        conn.execute("DROP TABLE IF EXISTS mem_fts")
+        conn.execute("DROP TABLE IF EXISTS mem_meta")
+        conn.execute("DROP TABLE IF EXISTS mem_anchors")
+        conn.executescript(_SCHEMA)
+        conn.execute("DELETE FROM schema_meta")
+        conn.execute("INSERT INTO schema_meta VALUES (?)", (_SCHEMA_VERSION,))
     return conn
 
 

@@ -11,16 +11,33 @@ from mcp.server.mcpserver import MCPServer
 from legendary import service
 
 
+def _slim(results: list[dict]) -> list[dict]:
+    """Strip internal bookkeeping before sending results to an agent.
+
+    `content_hash` (64-char sha256) and `score` are implementation detail the
+    agent cannot act on, but they are re-sent on every turn the result stays in
+    context. `commit` is kept only when it is actionable - i.e. when the anchor
+    is no longer fresh, so the agent can diff against it.
+    """
+    slim = []
+    for r in results:
+        anchors = []
+        for a in r.get("anchors", []):
+            keep = {k: v for k, v in a.items() if k not in ("content_hash", "commit")}
+            if a.get("staleness") != "fresh" and a.get("commit"):
+                keep["changed_since"] = a["commit"]
+            anchors.append(keep)
+        slim.append({k: v for k, v in r.items() if k != "score"} | {"anchors": anchors})
+    return slim
+
+
 def build_server(repo_root: Path) -> MCPServer:
     mcp = MCPServer(
         "legendary",
         instructions=(
-            "Code-anchored memory for this repository. Call `recall` BEFORE "
-            "starting work on a file to load prior decisions and failed "
-            "attempts. Call `remember` when you make a decision, discover a "
-            "convention, or an approach fails - anchor it to the relevant "
-            "file/symbol. Memories flagged 'stale' refer to code that has "
-            "changed since they were written: verify before trusting them."
+            "Repo memory. `recall` before editing a file; `remember` decisions "
+            "and failed attempts, anchored to file/symbol. 'stale' means the "
+            "anchored code changed since - verify before trusting."
         ),
     )
 
@@ -59,7 +76,7 @@ def build_server(repo_root: Path) -> MCPServer:
         """Search memories. Pass the files you are editing as files_in_focus
         to boost memories anchored to them. Results include a staleness flag
         per memory: fresh | stale (code changed) | orphaned (code gone)."""
-        return json.dumps(service.recall(repo_root, query, files_in_focus, k))
+        return json.dumps(_slim(service.recall(repo_root, query, files_in_focus, k)))
 
     @mcp.tool()
     def list_memories(

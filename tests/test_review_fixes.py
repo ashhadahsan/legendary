@@ -228,3 +228,95 @@ def test_supersede_updates_both_memories_in_index(repo: Path):
     )["id"]
     ids = [h[0] for h in search(repo, "beta body", limit=100)]
     assert new_id in ids and old_id not in ids
+
+
+def test_stemming_matches_word_forms(repo: Path):
+    """An agent's phrasing rarely matches how the memory was written."""
+    service.remember(
+        repo_root=repo,
+        type="episode",
+        title="WAL deadlocked on retry",
+        body="Wrapping retries in a transaction deadlocked under concurrency.",
+    )
+    for query in ("deadlock", "deadlocks", "deadlocked", "transactions", "wrap"):
+        assert service.recall(repo, query), f"{query!r} should match"
+
+
+def test_stale_schema_is_migrated_and_repopulated(repo: Path):
+    """An index built by an older version must not silently keep old behaviour."""
+    import sqlite3
+
+    import legendary.index as index_mod
+
+    service.remember(repo_root=repo, type="decision", title="kept", body="gamma body")
+
+    # simulate a v1 index: old tokenizer, old version marker
+    conn = sqlite3.connect(db_path(repo))
+    with conn:
+        conn.execute("DROP TABLE IF EXISTS mem_fts")
+        conn.execute(
+            "CREATE VIRTUAL TABLE mem_fts USING fts5(id UNINDEXED, title, body, tags)"
+        )
+        conn.execute("DELETE FROM schema_meta")
+        conn.execute("INSERT INTO schema_meta VALUES (1)")
+    conn.close()
+
+    # reading through the normal path migrates, then repopulates from markdown
+    assert [h[0] for h in search(repo, "gamma")] != []
+    conn = sqlite3.connect(db_path(repo))
+    assert conn.execute("SELECT version FROM schema_meta").fetchone()[0] == (
+        index_mod._SCHEMA_VERSION
+    )
+    conn.close()
+
+
+def test_mcp_recall_omits_internal_fields(repo: Path):
+    """content_hash and score are noise the agent re-reads every turn."""
+    import asyncio
+    import json as _json
+
+    from legendary.mcp_server import build_server
+
+    service.remember(
+        repo_root=repo,
+        type="episode",
+        title="delta finding",
+        body="delta body",
+        anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
+    )
+    server = build_server(repo)
+    payload = _json.loads(
+        asyncio.run(server.call_tool("recall", {"query": "delta"})).content[0].text
+    )
+    assert payload, "recall should return the memory"
+    assert "score" not in payload[0]
+    anchor = payload[0]["anchors"][0]
+    assert "content_hash" not in anchor
+    assert anchor["file"] == "src/sync/worker.py"
+    # fresh anchors carry no commit noise
+    assert "changed_since" not in anchor
+
+
+def test_mcp_recall_reports_commit_when_stale(repo: Path):
+    import asyncio
+    import json as _json
+
+    from legendary.mcp_server import build_server
+
+    service.remember(
+        repo_root=repo,
+        type="episode",
+        title="epsilon finding",
+        body="epsilon body",
+        anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
+    )
+    p = repo / "src/sync/worker.py"
+    p.write_text(p.read_text().replace("retries: int = 3", "retries: int = 7"))
+    payload = _json.loads(
+        asyncio.run(build_server(repo).call_tool("recall", {"query": "epsilon"}))
+        .content[0]
+        .text
+    )
+    anchor = payload[0]["anchors"][0]
+    assert anchor["staleness"] == "stale"
+    assert anchor.get("changed_since"), "stale anchors should say what to diff against"
