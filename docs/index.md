@@ -35,4 +35,5 @@ that stopped being true weeks ago.
   code, reviewed in PRs, shared by the whole team
 - **Local-first** - no cloud, no accounts, no API keys, no embeddings
 
-Start with the [Quickstart](quickstart.md).
+Start with the [Quickstart](quickstart.md), or browse the
+[source on GitHub](https://github.com/ashhadahsan/legendary).

@@ -6,6 +6,21 @@
   <strong>Code-anchored, staleness-aware, git-native memory for coding agents.</strong>
 </p>
 
+<p align="center">
+  <a href="https://ashhadahsan.github.io/legendary/"><strong>Documentation</strong></a> &nbsp;·&nbsp;
+  <a href="https://ashhadahsan.github.io/legendary/quickstart/">Quickstart</a> &nbsp;·&nbsp;
+  <a href="https://ashhadahsan.github.io/legendary/concepts/">Concepts</a> &nbsp;·&nbsp;
+  <a href="https://ashhadahsan.github.io/legendary/tools/">MCP tools</a> &nbsp;·&nbsp;
+  <a href="https://ashhadahsan.github.io/legendary/comparison/">Comparison</a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/ashhadahsan/legendary/actions/workflows/ci.yml"><img src="https://github.com/ashhadahsan/legendary/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://pypi.org/project/legendary-mcp/"><img src="https://img.shields.io/pypi/v/legendary-mcp.svg" alt="PyPI"></a>
+  <img src="https://img.shields.io/pypi/pyversions/legendary-mcp.svg" alt="Python versions">
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT"></a>
+</p>
+
 ---
 
 Coding agents are stateless: every session re-reads your repo, re-derives old
@@ -171,6 +186,18 @@ Human-readable, PR-reviewable, and it merges like code.
 
 Code-graph tools answer "what is this code?"; legendary answers "what do we
 already know about it, and is that still true?" Running both is a good setup.
+
+## Documentation
+
+Full docs at **[ashhadahsan.github.io/legendary](https://ashhadahsan.github.io/legendary/)** —
+[quickstart](https://ashhadahsan.github.io/legendary/quickstart/),
+[concepts](https://ashhadahsan.github.io/legendary/concepts/),
+[MCP tool reference](https://ashhadahsan.github.io/legendary/tools/),
+[CLI reference](https://ashhadahsan.github.io/legendary/cli/),
+[benchmark](https://ashhadahsan.github.io/legendary/benchmark/), and
+[FAQ](https://ashhadahsan.github.io/legendary/faq/).
+
+Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
