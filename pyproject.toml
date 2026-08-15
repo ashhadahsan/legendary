@@ -2,14 +2,41 @@
 name = "legendary-mcp"  # `legendary` is taken on PyPI; CLI command stays `legendary`
 version = "0.1.0"
 description = "Code-anchored, staleness-aware, git-native memory for coding agents"
+readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Ashhad Ahsan", email = "ashhadahsan@gmail.com" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "agent-memory",
+    "coding-agent",
+    "claude-code",
+    "llm",
+    "tree-sitter",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Software Development :: Documentation",
+    "Typing :: Typed",
+]
 dependencies = [
     "pydantic>=2.7",
     "pyyaml>=6.0",
     "mcp>=2.0",
     "tree-sitter-language-pack>=0.7",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ashhadahsan/legendary"
+Documentation = "https://ashhadahsan.github.io/legendary"
+Repository = "https://github.com/ashhadahsan/legendary"
+Issues = "https://github.com/ashhadahsan/legendary/issues"
 
 [project.scripts]
 legendary = "legendary.cli:main"
