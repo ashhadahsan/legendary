@@ -86,6 +86,14 @@ Optional auto-capture (Claude Code): the printed hooks run
 `legendary mcp` serves stdio by default; `--transport http` serves stateless
 streamable HTTP for containers and shared team deployments.
 
+## Recall quality
+
+Search uses SQLite FTS5 with Porter stemming, so an agent asking about
+`deadlock` finds a memory that says "deadlocked", and `transactions` finds
+"transaction" - word-form drift between how you ask and how it was written
+doesn't lose the memory. Ranking combines text relevance, overlap with the
+files you're editing, recency, and a penalty for staleness.
+
 ## How staleness works
 
 At write time each anchor stores a normalized content hash of the anchored
