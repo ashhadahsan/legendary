@@ -1,6 +1,12 @@
-# legendary
+<p align="center">
+  <img src="assets/logo.svg" alt="legendary" width="340">
+</p>
 
-**Code-anchored, staleness-aware, git-native memory for coding agents.**
+<p align="center">
+  <strong>Code-anchored, staleness-aware, git-native memory for coding agents.</strong>
+</p>
+
+---
 
 Coding agents are stateless: every session re-reads your repo, re-derives old
 decisions, and repeats debugging attempts that already failed. Memory
