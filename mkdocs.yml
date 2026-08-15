@@ -1,0 +1,31 @@
+site_name: legendary
+site_description: Code-anchored, staleness-aware memory for coding agents
+repo_url: https://github.com/ashhadahsan/legendary
+docs_dir: docs
+exclude_docs: |
+  superpowers/
+theme:
+  name: material
+  features: [navigation.sections, content.code.copy]
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle: {icon: material/brightness-7, name: Dark mode}
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle: {icon: material/brightness-4, name: Light mode}
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+nav:
+  - Home: index.md
+  - Quickstart: quickstart.md
+  - Concepts: concepts.md
+  - MCP tools: tools.md
+  - CLI: cli.md
+  - Comparison: comparison.md
+  - FAQ: faq.md
