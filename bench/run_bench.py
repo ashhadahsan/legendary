@@ -138,6 +138,9 @@ def repeated_failure(repo: Path) -> bool:
 
 def trial(arm: str, index: int, workdir: Path) -> dict:
     repo = workdir / f"{arm}-{index}"
+    # re-running a benchmark must not fail on leftovers from a previous run
+    if repo.exists():
+        shutil.rmtree(repo)
     shutil.copytree(SCENARIO, repo)
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
