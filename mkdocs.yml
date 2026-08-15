@@ -27,5 +27,6 @@ nav:
   - Concepts: concepts.md
   - MCP tools: tools.md
   - CLI: cli.md
+  - Benchmark: benchmark.md
   - Comparison: comparison.md
   - FAQ: faq.md
