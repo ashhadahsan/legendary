@@ -31,10 +31,13 @@ def build_server(repo_root: Path) -> MCPServer:
         body: str,
         anchors: Optional[list[dict]] = None,
         tags: Optional[list[str]] = None,
+        supersedes: Optional[str] = None,
     ) -> str:
         """Save a memory. type: decision|episode|convention|reference.
         Each anchor: {file, symbol?, lines?: [start, end]}. Anchors are
-        resolved and content-hashed now so staleness can be detected later."""
+        resolved and content-hashed now so staleness can be detected later.
+        Pass supersedes=<memory_id> when this memory corrects an existing one:
+        the old memory is deprecated and back-linked instead of being lost."""
         return json.dumps(
             service.remember(
                 repo_root,
@@ -43,6 +46,7 @@ def build_server(repo_root: Path) -> MCPServer:
                 body=body,
                 anchors=anchors,
                 tags=tags,
+                supersedes=supersedes,
             )
         )
 

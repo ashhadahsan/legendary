@@ -116,3 +116,23 @@ def files_for(repo_root: Path, memory_id: str) -> list[str]:
         return [r[0] for r in rows]
     finally:
         conn.close()
+
+
+def memories_for_file(repo_root: Path, file: str) -> list[str]:
+    """Active memory ids anchored to a file (repo-relative path)."""
+    # _ensure_populated, not bare _connect: the PreToolUse hook must work on a
+    # fresh clone where memories are committed but index.db is absent.
+    conn = _ensure_populated(repo_root, _connect(repo_root))
+    try:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT a.memory_id FROM mem_anchors a
+            JOIN mem_meta m ON m.id = a.memory_id
+            WHERE a.file = ? AND m.status = 'active'
+            ORDER BY a.memory_id
+            """,
+            (file,),
+        ).fetchall()
+        return [r[0] for r in rows]
+    finally:
+        conn.close()

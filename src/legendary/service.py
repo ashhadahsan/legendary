@@ -25,9 +25,16 @@ def remember(
     anchors: Optional[list[dict]] = None,
     tags: Optional[list[str]] = None,
     source: str = "agent",
+    supersedes: Optional[str] = None,
+    transcript: Optional[str] = None,
 ) -> dict[str, Any]:
     """Validate, anchor-resolve, save, and index a new memory."""
     created = datetime.now(timezone.utc)
+    old: Optional[Memory] = None
+    if supersedes is not None:
+        old = store.load(repo_root, supersedes)
+        if old is None:
+            raise ValueError(f"no such memory to supersede: {supersedes}")
     resolved: list[Anchor] = []
     for raw in anchors or []:
         try:
@@ -51,10 +58,22 @@ def remember(
             source=source,
             anchors=resolved,
             tags=tags or [],
+            transcript=transcript,
         )
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
     store.save(repo_root, memory)
+    if old is not None:
+        store.save(
+            repo_root,
+            old.model_copy(
+                update={
+                    "status": "deprecated",
+                    "deprecated_reason": f"superseded by {memory.id}",
+                    "superseded_by": memory.id,
+                }
+            ),
+        )
     idx.rebuild(repo_root)
     return {
         "id": memory.id,

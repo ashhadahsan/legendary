@@ -97,6 +97,7 @@ def extract_from_transcript(repo_root: Path, transcript_path: Path) -> list[str]
                 anchors=anchors,
                 tags=cand.get("tags") or [],
                 source="auto-extract",
+                transcript=str(transcript_path),
             )
         except ValueError:
             raw_type = cand.get("type")
@@ -114,6 +115,7 @@ def extract_from_transcript(repo_root: Path, transcript_path: Path) -> list[str]
                     anchors=[],
                     tags=cand.get("tags") or [],
                     source="auto-extract",
+                    transcript=str(transcript_path),
                 )
             except ValueError:
                 continue  # unsalvageable candidate: drop it

@@ -33,6 +33,8 @@ class Memory(BaseModel):
     source: MemorySource = "agent"
     status: MemoryStatus = "active"
     deprecated_reason: Optional[str] = None
+    superseded_by: Optional[str] = None
+    transcript: Optional[str] = None
     anchors: list[Anchor] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
