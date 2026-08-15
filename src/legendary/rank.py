@@ -46,7 +46,9 @@ def recall(
     now = now or datetime.now(timezone.utc)
     weights = _load_weights(repo_root)
     focus = set(files_in_focus or [])
-    hits = idx.search(repo_root, query)
+    # fetch a wider candidate pool than k: ranking reorders by staleness,
+    # focus overlap, and recency, so the FTS top-k is not the final top-k
+    hits = idx.search(repo_root, query, limit=max(50, k * 10))
     if not hits:
         return []
     max_rel = max(rel for _, rel in hits) or 1.0

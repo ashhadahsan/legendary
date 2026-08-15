@@ -37,6 +37,15 @@ def remember(
             raise ValueError(f"no such memory to supersede: {supersedes}")
     resolved: list[Anchor] = []
     for raw in anchors or []:
+        if not isinstance(raw, dict):
+            # LLM extraction sometimes emits ["src/foo.py"] instead of
+            # [{"file": "src/foo.py"}]; Anchor(**raw) would raise TypeError,
+            # which neither guard layer catches.
+            raise ValueError(
+                # NB: `type` is a parameter of this function, so type(raw) would
+                # call the string. Use __class__ instead.
+                f"anchor must be an object, got {raw.__class__.__name__}: {raw!r}"
+            )
         try:
             anchor = Anchor(**raw)
         except ValidationError as exc:

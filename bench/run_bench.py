@@ -124,8 +124,14 @@ def tests_pass(repo: Path) -> bool:
 
 def repeated_failure(repo: Path) -> bool:
     """Did the agent reintroduce the approach session 1 proved wrong?"""
+    # Exclude .legendary/: a memory whose body says "do not use BEGIN
+    # TRANSACTION" would otherwise score as a repeated failure, biasing the
+    # metric against the very arm being measured.
     diff = subprocess.run(
-        ["git", "diff"], cwd=repo, capture_output=True, text=True
+        ["git", "diff", "--", ".", ":(exclude).legendary"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
     ).stdout.lower()
     return any(pat.lower() in diff for pat in BAD_PATTERNS)
 

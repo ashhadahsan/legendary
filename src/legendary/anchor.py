@@ -117,7 +117,14 @@ def resolve_and_hash(repo_root: Path, anchor: Anchor) -> Anchor:
     whole-file anchor. region_text stays lenient for recall-time re-resolution.
     """
     path = repo_root / anchor.file
-    if anchor.symbol and path.is_file() and _symbol_span(path, anchor.symbol) is None:
+    # Only enforce symbol resolution for languages we can actually parse;
+    # elsewhere a symbol is a human label and the anchor degrades to lines/file.
+    if (
+        anchor.symbol
+        and path.is_file()
+        and path.suffix in _LANGS
+        and _symbol_span(path, anchor.symbol) is None
+    ):
         raise ValueError(
             f"symbol {anchor.symbol!r} not found in {anchor.file} - "
             "retry with a line range (lines: [start, end]) or drop the symbol"

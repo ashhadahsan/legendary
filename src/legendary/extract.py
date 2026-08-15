@@ -78,8 +78,11 @@ def _read_transcript(path: Path) -> str:
 
 def extract_from_transcript(repo_root: Path, transcript_path: Path) -> list[str]:
     """Run extraction; returns list of saved memory ids."""
+    if not transcript_path.is_file():
+        raise RuntimeError(f"transcript not found: {transcript_path}")
+    prompt = _PROMPT % _read_transcript(transcript_path)
     try:
-        raw = _run_claude(_PROMPT % _read_transcript(transcript_path))
+        raw = _run_claude(prompt)
     except FileNotFoundError as exc:
         raise RuntimeError(
             "claude CLI not found - install Claude Code or skip auto-extraction; "

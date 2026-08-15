@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import hashlib
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 MemoryType = Literal["decision", "episode", "convention", "reference"]
 MemorySource = Literal["agent", "auto-extract", "human"]
@@ -37,6 +37,16 @@ class Memory(BaseModel):
     transcript: Optional[str] = None
     anchors: list[Anchor] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+
+    @field_validator("created")
+    @classmethod
+    def _ensure_aware(cls, v: datetime) -> datetime:
+        """Hand-edited markdown may carry a naive timestamp; assume UTC.
+
+        Without this a single naive `created:` breaks recall for the entire
+        repo (offset-naive vs offset-aware subtraction in rank.py).
+        """
+        return v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
 
     @staticmethod
     def new_id(title: str, created: datetime) -> str:

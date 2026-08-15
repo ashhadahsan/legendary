@@ -29,6 +29,11 @@ def _connect(repo_root: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(db_path(repo_root))
     try:
         conn.executescript(_SCHEMA)
+    except sqlite3.OperationalError:
+        # "database is locked" is transient contention, NOT corruption.
+        # Deleting here would destroy a healthy index under an active writer.
+        conn.close()
+        raise
     except sqlite3.DatabaseError:
         # Corrupt index: the markdown store is canonical, so throw it away and
         # start clean. Deleting before reconnecting keeps rebuild() from
