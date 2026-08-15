@@ -25,26 +25,43 @@ and failures. If `both` wins, that is the result we publish.
 Each trial is TWO sessions with separate context - the amnesia boundary is the
 thing under test:
 
-- **Session 1:** fix the failing concurrency test for `sync/worker.py`. A
-  plausible-looking fix (wrapping the writes in an explicit
-  `BEGIN TRANSACTION`) does **not** work; the working fix is
-  `PRAGMA busy_timeout`. The agent discovers this the hard way.
+- **Session 1:** fix the failing concurrency test for `sync/worker.py`. The
+  counter is incremented with a read-modify-write inside a *deferred*
+  transaction. Under concurrency SQLite returns `SQLITE_BUSY` on the lock
+  upgrade **without invoking the busy handler**, because retrying cannot
+  resolve it. So the two most intuitive fixes - raising `busy_timeout` and
+  wrapping in `BEGIN TRANSACTION` - are genuine dead ends. Only
+  `BEGIN IMMEDIATE` works.
 - **Session 2 (fresh context):** fix the same class of bug in
-  `sync/reporter.py`. An agent with no memory of session 1 tends to retry the
-  transaction approach.
+  `sync/reporter.py`. Without memory of session 1, agents re-explore the same
+  dead ends.
 
-The fixture is validated: broken -> both tests fail; `busy_timeout` -> both
-pass; `BEGIN TRANSACTION` -> still fails.
+Fixture validated four ways before benchmarking:
+
+| attempt | result |
+|---|---|
+| broken baseline | fails |
+| larger `busy_timeout` (60s) | still fails |
+| `BEGIN TRANSACTION` (deferred) | still fails |
+| `BEGIN IMMEDIATE` | passes |
+
+The previous fixture was discarded: it allowed a legitimate
+`sqlite3.connect(timeout=...)` fix, so no agent was tempted into the trap and
+`repeated_failure` could not discriminate. That run stays in git history.
 
 ## Pre-registered metrics
 
 - `tokens_total` = input + cache_creation + cache_read + output, both sessions
 - `cost_usd`, `duration_s`, `num_turns`
-- `repeated_failure` (bool) - did session 2 introduce the known-bad pattern?
-  Detected deterministically by searching session 2's diff (case-insensitive)
-  for any pattern in `BAD_PATTERNS` in `run_bench.py`, which is exactly
-  `BEGIN TRANSACTION` and `conn.execute("BEGIN`. This list and the code must
-  stay identical; changing one without the other invalidates the results.
+- `dead_ends` (per session) - which of `DEAD_END_PATTERNS` in run_bench.py
+  appear in that session's assistant transcript: `busy_timeout`,
+  `BUSY_TIMEOUT_MS`, `timeout=`, `time.sleep`, `BEGIN TRANSACTION`,
+  `BEGIN DEFERRED`. This list and the code must stay identical.
+- `repeated_failure` (bool) - true when session 2 explored any dead end.
+  Measured from session 2's **transcript**, not the final diff: an agent that
+  tries `busy_timeout`, watches it fail, and reverts it leaves no diff trace
+  but has still burned the tokens.
+- `found_correct_fix` (bool) - `BEGIN IMMEDIATE` appears in the transcript
 - `correct` (bool) - does `pytest` pass in the scenario repo afterwards?
 
 ## Rules
