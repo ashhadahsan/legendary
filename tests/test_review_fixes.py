@@ -150,3 +150,81 @@ def test_unicode_round_trips_through_the_store(repo: Path):
     loaded = load(repo, "mem-uni")
     assert loaded.title == m.title
     assert loaded.body.strip() == m.body
+
+
+def test_upsert_matches_full_rebuild(repo: Path):
+    """Incremental indexing must produce the same result as a full rebuild."""
+    for n in range(5):
+        service.remember(
+            repo_root=repo,
+            type="decision",
+            title=f"alpha note {n}",
+            body="shared alpha body",
+            anchors=[{"file": "src/sync/worker.py"}],
+        )
+    incremental = search(repo, "alpha body", limit=100)
+    rebuild(repo)
+    assert search(repo, "alpha body", limit=100) == incremental
+
+
+def test_remember_does_not_rebuild_whole_index(repo: Path, monkeypatch):
+    """Writes must be O(1): a full rebuild per write made bulk writes O(n^2)."""
+    import legendary.index as index_mod
+
+    service.remember(
+        repo_root=repo, type="decision", title="seed", body="s", anchors=[]
+    )
+
+    calls = {"n": 0}
+    real_rebuild = index_mod.rebuild
+
+    def counting_rebuild(root):
+        calls["n"] += 1
+        return real_rebuild(root)
+
+    monkeypatch.setattr(index_mod, "rebuild", counting_rebuild)
+    for n in range(5):
+        service.remember(
+            repo_root=repo, type="decision", title=f"n{n}", body="b", anchors=[]
+        )
+    assert calls["n"] == 0
+
+
+def test_upsert_populates_index_on_fresh_clone(repo: Path):
+    """A clone has memories but no index; one upsert must not leave it partial."""
+    for n in range(4):
+        service.remember(
+            repo_root=repo,
+            type="reference",
+            title=f"clone note {n}",
+            body="cloned body",
+        )
+    db_path(repo).unlink()  # simulate the gitignored index being absent
+    service.remember(
+        repo_root=repo, type="reference", title="clone note new", body="cloned body"
+    )
+    assert len(search(repo, "cloned body", limit=100)) == 5
+
+
+def test_deprecate_leaves_search_via_upsert(repo: Path):
+    mid = service.remember(
+        repo_root=repo, type="decision", title="temporary rule", body="rule body"
+    )["id"]
+    assert search(repo, "rule body")
+    service.deprecate(repo, mid, reason="obsolete")
+    assert all(h[0] != mid for h in search(repo, "rule body"))
+
+
+def test_supersede_updates_both_memories_in_index(repo: Path):
+    old_id = service.remember(
+        repo_root=repo, type="decision", title="old rule", body="beta body"
+    )["id"]
+    new_id = service.remember(
+        repo_root=repo,
+        type="decision",
+        title="new rule",
+        body="beta body",
+        supersedes=old_id,
+    )["id"]
+    ids = [h[0] for h in search(repo, "beta body", limit=100)]
+    assert new_id in ids and old_id not in ids

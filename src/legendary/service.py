@@ -72,18 +72,17 @@ def remember(
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
     store.save(repo_root, memory)
+    idx.upsert(repo_root, memory)
     if old is not None:
-        store.save(
-            repo_root,
-            old.model_copy(
-                update={
-                    "status": "deprecated",
-                    "deprecated_reason": f"superseded by {memory.id}",
-                    "superseded_by": memory.id,
-                }
-            ),
+        superseded = old.model_copy(
+            update={
+                "status": "deprecated",
+                "deprecated_reason": f"superseded by {memory.id}",
+                "superseded_by": memory.id,
+            }
         )
-    idx.rebuild(repo_root)
+        store.save(repo_root, superseded)
+        idx.upsert(repo_root, superseded)
     return {
         "id": memory.id,
         "anchors": [a.model_dump(exclude_none=True) for a in resolved],
@@ -125,7 +124,7 @@ def deprecate(repo_root: Path, memory_id: str, reason: str) -> dict[str, Any]:
         raise ValueError(f"no such memory: {memory_id}")
     m = m.model_copy(update={"status": "deprecated", "deprecated_reason": reason})
     store.save(repo_root, m)
-    idx.rebuild(repo_root)
+    idx.upsert(repo_root, m)
     return {"id": memory_id, "status": "deprecated"}
 
 

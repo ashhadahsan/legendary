@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from legendary.models import Memory
 from legendary.store import legendary_dir, load_all, memories_dir
 
 _SCHEMA = """
@@ -61,6 +62,54 @@ def _ensure_populated(repo_root: Path, conn: sqlite3.Connection) -> sqlite3.Conn
     return _connect(repo_root)
 
 
+def _delete_rows(conn: sqlite3.Connection, memory_id: str) -> None:
+    conn.execute("DELETE FROM mem_fts WHERE id = ?", (memory_id,))
+    conn.execute("DELETE FROM mem_meta WHERE id = ?", (memory_id,))
+    conn.execute("DELETE FROM mem_anchors WHERE memory_id = ?", (memory_id,))
+
+
+def _insert_rows(conn: sqlite3.Connection, m: Memory) -> None:
+    conn.execute(
+        "INSERT INTO mem_fts (id, title, body, tags) VALUES (?,?,?,?)",
+        (m.id, m.title, m.body, " ".join(m.tags)),
+    )
+    conn.execute(
+        "INSERT INTO mem_meta VALUES (?,?,?,?)",
+        (m.id, m.type, m.status, m.created.isoformat()),
+    )
+    for a in m.anchors:
+        conn.execute("INSERT INTO mem_anchors VALUES (?,?)", (m.id, a.file))
+
+
+def upsert(repo_root: Path, memory: Memory) -> None:
+    """Index a single memory in place.
+
+    Writes are O(1) instead of O(n): rebuilding the whole index on every
+    `remember` made bulk writes quadratic (measured at ~31ms/write with only
+    70 memories, growing linearly with store size).
+    """
+    # _ensure_populated first: on a fresh clone the index is empty while the
+    # store is full, and inserting one row would leave it permanently partial
+    # (a non-empty index never triggers the auto-rebuild).
+    conn = _ensure_populated(repo_root, _connect(repo_root))
+    try:
+        with conn:
+            _delete_rows(conn, memory.id)
+            _insert_rows(conn, memory)
+    finally:
+        conn.close()
+
+
+def remove(repo_root: Path, memory_id: str) -> None:
+    """Drop a single memory from the index."""
+    conn = _connect(repo_root)
+    try:
+        with conn:
+            _delete_rows(conn, memory_id)
+    finally:
+        conn.close()
+
+
 def rebuild(repo_root: Path) -> int:
     """Rebuild the whole index from the markdown store. Returns count indexed."""
     conn = _connect(repo_root)
@@ -70,16 +119,7 @@ def rebuild(repo_root: Path) -> int:
         conn.execute("DELETE FROM mem_anchors")
         memories = load_all(repo_root)
         for m in memories:
-            conn.execute(
-                "INSERT INTO mem_fts (id, title, body, tags) VALUES (?,?,?,?)",
-                (m.id, m.title, m.body, " ".join(m.tags)),
-            )
-            conn.execute(
-                "INSERT INTO mem_meta VALUES (?,?,?,?)",
-                (m.id, m.type, m.status, m.created.isoformat()),
-            )
-            for a in m.anchors:
-                conn.execute("INSERT INTO mem_anchors VALUES (?,?)", (m.id, a.file))
+            _insert_rows(conn, m)
     conn.close()
     return len(memories)
 
@@ -103,7 +143,10 @@ def search(repo_root: Path, query: str, limit: int = 50) -> list[tuple[str, floa
             SELECT f.id, -bm25(mem_fts) AS rel
             FROM mem_fts f JOIN mem_meta m ON m.id = f.id
             WHERE mem_fts MATCH ? AND m.status = 'active'
-            ORDER BY rel DESC LIMIT ?
+            -- tie-break on id: without it, equally-relevant memories come back
+            -- in physical row order, so an incrementally-built index and a
+            -- freshly-rebuilt one rank the same repo differently.
+            ORDER BY rel DESC, f.id LIMIT ?
             """,
             (q, limit),
         ).fetchall()
