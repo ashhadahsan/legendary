@@ -1,17 +1,23 @@
-"""Aggregates rows written by workers. Same concurrency profile as worker.py."""
+"""Records hits against the shared counter. Runs from many threads at once."""
 
 from sync.db import connect
 
 
-def record_summary(db_path: str, worker: str, count: int) -> int:
-    """Write `count` summary rows. Returns the number written."""
+def record_hit(db_path: str, worker: str, times: int) -> int:
+    """Read-modify-write the shared counter `times` times."""
     conn = connect(db_path)
-    written = 0
+    done = 0
     try:
-        for n in range(count):
-            conn.execute("INSERT INTO rows VALUES (?, ?)", (f"summary-{worker}", n))
-            conn.commit()
-            written += 1
+        for _ in range(times):
+            conn.execute("BEGIN")
+            current = conn.execute(
+                "SELECT value FROM counter WHERE name = 'total'"
+            ).fetchone()[0]
+            conn.execute(
+                "UPDATE counter SET value = ? WHERE name = 'total'", (current + 1,)
+            )
+            conn.execute("COMMIT")
+            done += 1
     finally:
         conn.close()
-    return written
+    return done

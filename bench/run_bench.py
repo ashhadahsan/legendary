@@ -23,9 +23,19 @@ SESSION_2 = (
     "`pytest tests/test_sync.py -k reporter` passes. Do not modify the tests."
 )
 
-# The plausible-but-wrong approach session 1 teaches you to avoid. Keep this
-# list identical to the one pre-registered in bench/README.md.
-BAD_PATTERNS = ["BEGIN TRANSACTION", 'conn.execute("BEGIN']
+# Dead ends session 1 proves do not work. SQLite raises SQLITE_BUSY on a
+# deferred-transaction lock upgrade WITHOUT invoking the busy handler, so
+# raising the timeout or retrying cannot help; only BEGIN IMMEDIATE does.
+# Keep identical to the pre-registration in bench/README.md.
+DEAD_END_PATTERNS = [
+    "busy_timeout",
+    "BUSY_TIMEOUT_MS",
+    "timeout=",
+    "time.sleep",
+    "BEGIN TRANSACTION",
+    "BEGIN DEFERRED",
+]
+CORRECT_PATTERN = "BEGIN IMMEDIATE"
 
 # Graphify ships on PyPI as `graphifyy` (the `graphify` name is a different,
 # unrelated package). Confirm both invocations with `graphify --help` before
@@ -72,8 +82,12 @@ def run_session(repo: Path, prompt: str, config_path: Path) -> dict:
         "claude",
         "-p",
         prompt,
+        # stream-json exposes every assistant turn, so dead ends the agent tried
+        # and then reverted are still measurable; the final `result` event
+        # carries usage. A plain final-diff check would miss reverted attempts.
         "--output-format",
-        "json",
+        "stream-json",
+        "--verbose",
         "--dangerously-skip-permissions",
         "--max-turns",
         "40",
@@ -86,13 +100,24 @@ def run_session(repo: Path, prompt: str, config_path: Path) -> dict:
     started = time.monotonic()
     proc = subprocess.run(cmd, cwd=repo, capture_output=True, text=True, timeout=1800)
     elapsed = time.monotonic() - started
-    try:
-        data = json.loads(proc.stdout)
-    except json.JSONDecodeError:
+
+    data = None
+    transcript: list[str] = []
+    for line in proc.stdout.splitlines():
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if event.get("type") == "result":
+            data = event
+        elif event.get("type") == "assistant":
+            transcript.append(json.dumps(event.get("message", {})))
+    if data is None:
         return {
             "error": (proc.stdout[-2000:] or proc.stderr[-2000:]),
             "duration_s": round(elapsed, 1),
         }
+    text = "\n".join(transcript)
     u = data.get("usage", {})
     return {
         "tokens_total": sum(
@@ -108,6 +133,10 @@ def run_session(repo: Path, prompt: str, config_path: Path) -> dict:
         "num_turns": data.get("num_turns"),
         "duration_s": round(elapsed, 1),
         "is_error": data.get("is_error"),
+        "dead_ends": sorted(
+            {p for p in DEAD_END_PATTERNS if p.lower() in text.lower()}
+        ),
+        "found_correct_fix": CORRECT_PATTERN.lower() in text.lower(),
     }
 
 
@@ -122,18 +151,14 @@ def tests_pass(repo: Path) -> bool:
     return proc.returncode == 0
 
 
-def repeated_failure(repo: Path) -> bool:
-    """Did the agent reintroduce the approach session 1 proved wrong?"""
-    # Exclude .legendary/: a memory whose body says "do not use BEGIN
-    # TRANSACTION" would otherwise score as a repeated failure, biasing the
-    # metric against the very arm being measured.
-    diff = subprocess.run(
-        ["git", "diff", "--", ".", ":(exclude).legendary"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    ).stdout.lower()
-    return any(pat.lower() in diff for pat in BAD_PATTERNS)
+def repeated_failure(session_2: dict) -> bool:
+    """Did session 2 re-explore dead ends that session 1 already ruled out?
+
+    Measured from session 2's own transcript rather than the final diff: an
+    agent that tries busy_timeout, sees it fail, and reverts it leaves no trace
+    in the diff but has still burned the tokens.
+    """
+    return bool(session_2.get("dead_ends"))
 
 
 def trial(arm: str, index: int, workdir: Path) -> dict:
@@ -210,7 +235,7 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
         "duration_s": round(
             (s1.get("duration_s") or 0) + (s2.get("duration_s") or 0), 1
         ),
-        "repeated_failure": repeated_failure(repo),
+        "repeated_failure": repeated_failure(s2),
         "correct": tests_pass(repo),
     }
 
