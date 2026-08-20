@@ -73,10 +73,14 @@ present in the fixture's own `sync/db.py`. Any agent that read that file
 matched the pattern. The reported "5/5 repeated failures in both arms" was
 detecting agents *reading source code*, not agents repeating mistakes.
 
-**3. The hook arm never exercised the hook.** No `Legendary memories anchored`
-string appears in any `legendary_hook` transcript: the `.claude/settings.json`
-written into the trial repo was not picked up by headless `claude -p`. That arm
-paid the overhead of the configuration without testing it.
+**3. (Corrected 2026-08-20.)** We first reported that the hook arm never fired
+the hook. That was wrong - our detection searched only *assistant* transcript
+events, while hook injections arrive as user-side context. The `.surfaced-*`
+cache files in both trial repos prove the hook fired. Verified independently:
+`.claude/settings.json` in a repo DOES activate PreToolUse hooks under headless
+`claude -p`, including with `--strict-mcp-config`, and in a clean single-file
+test the injected memory visibly shaped the answer. The hook arm's numbers
+remain uninterpretable anyway, because of defect 1.
 
 ### What survives
 
@@ -87,10 +91,9 @@ Only these, and they are weak:
   is actually required.
 - Agents did call `recall` and `remember` unprompted, from tool descriptions
   alone. Delivery via MCP works.
-- A separate, real product concern surfaced: if `.claude/settings.json` in a
-  repo does not activate the hook in headless mode, the setup this project
-  documents may not work the way users expect. That is being verified
-  independently of the benchmark.
+- The documented hook setup works: `.claude/settings.json` activates the
+  PreToolUse hook in headless mode (initially reported otherwise; corrected
+  above).
 
 ### What a valid benchmark requires
 
