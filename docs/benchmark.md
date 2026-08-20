@@ -51,65 +51,57 @@ uv run python bench/report.py
 This costs real API credits (40 agent sessions at the default settings) and is
 deliberately excluded from CI.
 
-## Results (n=5 per arm, 2026-08-15)
+## Results: RETRACTED (2026-08-15)
 
-**legendary lost.** Published in full, as pre-registered.
+**The n=5 run published earlier is withdrawn. It measured nothing, because of
+three defects in the harness and fixture - all ours.**
 
-| arm | n | median tokens | median cost | repeated failure | correct |
-|---|---|---:|---:|---|---|
-| baseline | 5 | **493,288** (458,623-536,701) | **$0.84** | 5/5 | 5/5 |
-| legendary | 5 | 571,264 (546,561-694,317) | $1.08 | 5/5 | 5/5 |
+The raw numbers stay in `bench/results/` and in git history. What is withdrawn
+is any inference from them, in either direction.
 
-- **+16% tokens, +29% cost** versus no memory at all.
-- **`repeated_failure` was 5/5 in both arms.** legendary did not prevent
-  agents from re-exploring dead ends, which is the single thing it exists to
-  prevent.
-- Session 2 - where memory should pay off - was **36% more expensive** with
-  legendary (316k vs 232k median). The predicted effect ran backwards.
-- Correctness was unaffected: every trial in both arms ended green.
+### Why it was invalid
 
-### Why - what the data does and does not say
+**1. The task did not require memory.** Session 1 fixes `sync/worker.py` with
+`BEGIN IMMEDIATE`. Session 2 then opens a repo where that fix is sitting in the
+sibling file. An agent can simply read `worker.py` and copy the pattern - no
+memory needed. We built a memory benchmark in which the codebase *is* the
+memory, so the baseline was never actually memory-less.
 
-The obvious explanation is that agents ignored the tool. In 2 of 5 trials the
-agent never called `remember` at all, so session 2 had nothing to recall while
-still paying for five tool definitions in context on every turn.
+**2. `repeated_failure` was a false positive in every trial of both arms.**
+`DEAD_END_PATTERNS` included `busy_timeout` and `BUSY_TIMEOUT_MS`, which are
+present in the fixture's own `sync/db.py`. Any agent that read that file
+matched the pattern. The reported "5/5 repeated failures in both arms" was
+detecting agents *reading source code*, not agents repeating mistakes.
 
-**But that explanation does not survive the data:**
+**3. The hook arm never exercised the hook.** No `Legendary memories anchored`
+string appears in any `legendary_hook` transcript: the `.claude/settings.json`
+written into the trial repo was not picked up by headless `claude -p`. That arm
+paid the overhead of the configuration without testing it.
 
-| legendary trials | session 2 median tokens |
-|---|---:|
-| memory was saved (n=3) | 342,287 |
-| no memory saved (n=2) | 273,378 |
-| baseline (n=5) | **232,177** |
+### What survives
 
-Trials *with* a memory available did **worse** than trials without. Having the
-memory did not help; it correlated with higher cost. Any story that legendary
-would have won "if only the agent had used it" is not supported here.
+Only these, and they are weak:
 
-### Honest caveats, in both directions
+- Token and cost totals were really measured. In this (invalid) task shape,
+  legendary cost more than baseline. That says nothing about tasks where memory
+  is actually required.
+- Agents did call `recall` and `remember` unprompted, from tool descriptions
+  alone. Delivery via MCP works.
+- A separate, real product concern surfaced: if `.claude/settings.json` in a
+  repo does not activate the hook in headless mode, the setup this project
+  documents may not work the way users expect. That is being verified
+  independently of the benchmark.
 
-1. **n=5 with wide variance.** The subgroup comparison above rests on n=3 vs
-   n=2. It is suggestive, not conclusive.
-2. **A 2-session task may be too short to amortize.** legendary pays a write
-   cost in session 1 and can only recover it in later sessions. Two sessions is
-   the worst case for a memory tool; the interesting curve is at 4+.
-3. **The benchmark tested a configuration this project does not recommend.**
-   Only the MCP server was enabled. The `PreToolUse` surface hook - the
-   mechanism specifically designed to deliver memories *without* relying on the
-   agent choosing to call `recall` - was **not** configured. That is a real gap
-   between what we ship and what we measured, and it is our error, not a
-   defence of the result.
+### What a valid benchmark requires
 
-### What this changes
+1. **Knowledge that cannot be recovered from the repo.** The insight must exist
+   only in the earlier session - e.g. an approach that was tried and reverted,
+   leaving no trace in the code, or an external constraint discovered at
+   runtime.
+2. **Dead-end detection that cannot match pre-existing source.** Patterns must
+   be checked against a diff of what the agent *wrote*, and must not appear in
+   the fixture to begin with.
+3. **Verification that each arm's configuration actually activated**, asserted
+   before trials count.
 
-The result stands for the configuration tested: **on a two-session task with
-MCP tools alone, legendary costs more and prevents nothing.** Until a run with
-the hook enabled says otherwise, no token or cost claim belongs in this
-project's marketing.
-
-The next run should (a) enable the `PreToolUse` hook, (b) extend to 4+ sessions
-so the write cost has a chance to amortise, and (c) persist session transcripts
-so we can see whether `recall` was ever called in session 2 - the current
-harness discards them, which is why that question is still open.
-
-Raw per-trial JSON for all ten runs is in `bench/results/`.
+Until those exist, this project makes **no performance claim**.

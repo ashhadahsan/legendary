@@ -181,18 +181,16 @@ Working approach: PRAGMA busy_timeout.
 
 Human-readable, PR-reviewable, and it merges like code.
 
-## Benchmark: an honest negative result
+## Benchmark: retracted
 
-On a two-session task with MCP tools alone, **legendary used 16% more tokens
-than no memory at all** and did not prevent agents re-exploring dead ends
-(5/5 in both arms). Trials where a memory *was* saved did worse than trials
-where none was. Full numbers, caveats, and raw data:
-[benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
+An earlier n=5 run reported that legendary cost more than no memory at all. **That
+result has been withdrawn** - the fixture let session 2 recover the answer by
+reading the file session 1 had already fixed, and the headline metric matched
+strings present in the fixture's own source. It measured nothing.
 
-The tested configuration omitted the `PreToolUse` hook that this README
-recommends, and two sessions is the shortest possible payback window - both are
-being re-run. Until those numbers exist, this project makes **no performance
-claim**.
+The raw data and a full account of the three defects are published at
+[benchmark](https://ashhadahsan.github.io/legendary/benchmark/). This project
+makes **no performance claim** until a valid benchmark exists.
 
 ## How this differs from other tools
 
