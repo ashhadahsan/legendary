@@ -50,8 +50,19 @@ ARMS = {
     "baseline": [],
     "graphify": ["graphify"],
     "legendary": ["legendary"],
+    # the configuration this project actually recommends: MCP tools *plus* the
+    # PreToolUse hook, so memories arrive without the agent choosing to ask
+    "legendary_hook": ["legendary", "hook"],
     "both": ["graphify", "legendary"],
 }
+
+# tool calls we want to see in a transcript, to tell "did not use it" apart
+# from "used it and it did not help"
+TOOL_MARKERS = [
+    "mcp__legendary__recall",
+    "mcp__legendary__remember",
+    "Legendary memories anchored",
+]
 
 
 def mcp_config(tools: list[str], repo: Path) -> dict:
@@ -137,6 +148,8 @@ def run_session(repo: Path, prompt: str, config_path: Path) -> dict:
             {p for p in DEAD_END_PATTERNS if p.lower() in text.lower()}
         ),
         "found_correct_fix": CORRECT_PATTERN.lower() in text.lower(),
+        "legendary_signals": sorted({m for m in TOOL_MARKERS if m in text}),
+        "transcript": text,
     }
 
 
@@ -201,6 +214,31 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
             check=True,
             capture_output=True,
         )
+    if "hook" in tools:
+        settings = repo / ".claude"
+        settings.mkdir(exist_ok=True)
+        (settings / "settings.json").write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PreToolUse": [
+                            {
+                                "matcher": "Read|Edit|Write",
+                                "hooks": [
+                                    {
+                                        "type": "command",
+                                        "command": (
+                                            "uvx --from legendary-mcp legendary "
+                                            f"surface --repo {repo}"
+                                        ),
+                                    }
+                                ],
+                            }
+                        ]
+                    }
+                }
+            )
+        )
     if "graphify" in tools:
         # Graphify must index the repo before its MCP server can answer anything
         subprocess.run(GRAPHIFY_BUILD, cwd=repo, check=True, capture_output=True)
@@ -258,6 +296,9 @@ def main() -> int:
         for arm in args.arms:
             print(f"running {arm} trial {i + 1}/{args.trials}...", flush=True)
             record = trial(arm, i, args.workdir)
+            for key in ("session_1", "session_2"):
+                text = record[key].pop("transcript", "")
+                (RESULTS / f"{arm}-{i}-{key}.txt").write_text(text)
             (RESULTS / f"{arm}-{i}.json").write_text(json.dumps(record, indent=2))
             print(
                 f"  tokens={record['tokens_total']} "
