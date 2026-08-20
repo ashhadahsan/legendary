@@ -251,8 +251,11 @@ def main() -> int:
 
     RESULTS.mkdir(exist_ok=True)
     args.workdir.mkdir(parents=True, exist_ok=True)
-    for arm in args.arms:
-        for i in range(args.trials):
+    # Interleaved (round-major, not arm-major): if the run is interrupted -
+    # usage limit, ctrl-c - the completed trials still cover every arm equally
+    # and remain comparable, instead of being 5 baseline and 0 legendary.
+    for i in range(args.trials):
+        for arm in args.arms:
             print(f"running {arm} trial {i + 1}/{args.trials}...", flush=True)
             record = trial(arm, i, args.workdir)
             (RESULTS / f"{arm}-{i}.json").write_text(json.dumps(record, indent=2))
