@@ -1,0 +1,32 @@
+{
+  "arm": "legendary",
+  "trial": 2,
+  "session_1": {
+    "tokens_total": 303116,
+    "cost_usd": 0.633395,
+    "num_turns": 13,
+    "duration_s": 58.1,
+    "is_error": false,
+    "dead_ends": [
+      "BEGIN TRANSACTION",
+      "busy_timeout"
+    ],
+    "found_correct_fix": true
+  },
+  "session_2": {
+    "tokens_total": 268148,
+    "cost_usd": 0.4358445,
+    "num_turns": 12,
+    "duration_s": 48.2,
+    "is_error": false,
+    "dead_ends": [
+      "busy_timeout"
+    ],
+    "found_correct_fix": true
+  },
+  "tokens_total": 571264,
+  "cost_usd": 1.0692,
+  "duration_s": 106.3,
+  "repeated_failure": true,
+  "correct": true
+}

@@ -181,6 +181,19 @@ Working approach: PRAGMA busy_timeout.
 
 Human-readable, PR-reviewable, and it merges like code.
 
+## Benchmark: an honest negative result
+
+On a two-session task with MCP tools alone, **legendary used 16% more tokens
+than no memory at all** and did not prevent agents re-exploring dead ends
+(5/5 in both arms). Trials where a memory *was* saved did worse than trials
+where none was. Full numbers, caveats, and raw data:
+[benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
+
+The tested configuration omitted the `PreToolUse` hook that this README
+recommends, and two sessions is the shortest possible payback window - both are
+being re-run. Until those numbers exist, this project makes **no performance
+claim**.
+
 ## How this differs from other tools
 
 | | Graphify / Serena | mem0 / Zep | legendary |

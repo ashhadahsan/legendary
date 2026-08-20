@@ -51,48 +51,65 @@ uv run python bench/report.py
 This costs real API credits (40 agent sessions at the default settings) and is
 deliberately excluded from CI.
 
-## Results
+## Results (n=5 per arm, 2026-08-15)
 
-### Preliminary smoke run (n=1 per arm) - NOT a claim
+**legendary lost.** Published in full, as pre-registered.
 
-One trial per arm, run to validate the harness. **This is not statistically
-meaningful** and should not be quoted as evidence. The pre-registered protocol
-requires n>=5 with median and range; those numbers will replace this section.
+| arm | n | median tokens | median cost | repeated failure | correct |
+|---|---|---:|---:|---|---|
+| baseline | 5 | **493,288** (458,623-536,701) | **$0.84** | 5/5 | 5/5 |
+| legendary | 5 | 571,264 (546,561-694,317) | $1.08 | 5/5 | 5/5 |
 
-| metric | baseline | legendary |
-|---|---:|---:|
-| tokens total | 1,108,794 | 864,798 (-22%) |
-| wall clock | 144.8 s | 96.2 s (-34%) |
-| cost | $0.95 | $1.04 (**+9%**) |
-| repeated_failure | False | False |
-| correct | True | True |
+- **+16% tokens, +29% cost** versus no memory at all.
+- **`repeated_failure` was 5/5 in both arms.** legendary did not prevent
+  agents from re-exploring dead ends, which is the single thing it exists to
+  prevent.
+- Session 2 - where memory should pay off - was **36% more expensive** with
+  legendary (316k vs 232k median). The predicted effect ran backwards.
+- Correctness was unaffected: every trial in both arms ended green.
 
-Per-session split, which is where the predicted mechanism shows up:
+### Why - what the data does and does not say
 
-| | baseline | legendary |
-|---|---:|---:|
-| session 1 | 355,446 | 461,013 (pays to write memory) |
-| session 2 | 753,348 | **403,785** |
+The obvious explanation is that agents ignored the tool. In 2 of 5 trials the
+agent never called `remember` at all, so session 2 had nothing to recall while
+still paying for five tool definitions in context on every turn.
 
-Baseline's second session cost roughly twice its first, re-deriving what it had
-just worked out. legendary's second session used ~46% fewer tokens than
-baseline's.
+**But that explanation does not survive the data:**
 
-### Honest caveats
+| legendary trials | session 2 median tokens |
+|---|---:|
+| memory was saved (n=3) | 342,287 |
+| no memory saved (n=2) | 273,378 |
+| baseline (n=5) | **232,177** |
 
-1. **n=1 proves nothing.** Agent runs vary widely - baseline's own two sessions
-   differed by 2x.
-2. **Cost rose 9% despite 22% fewer tokens.** The token mix shifted toward
-   uncached input. "Fewer tokens and faster" is supportable so far; "cheaper"
-   is not.
-3. **`repeated_failure` did not discriminate** (False for both arms). The
-   scenario let agents fix the bug with `sqlite3.connect(timeout=...)`, a
-   legitimate alternative sitting right next to the intended `BEGIN
-   TRANSACTION` trap, so neither arm was tempted into it. That is a flaw in the
-   fixture design, not a finding about the tools. A future revision needs a bug
-   whose *obvious* fix is genuinely wrong. The metric stays in the
-   pre-registration and is reported as "did not discriminate" rather than
-   dropped.
+Trials *with* a memory available did **worse** than trials without. Having the
+memory did not help; it correlated with higher cost. Any story that legendary
+would have won "if only the agent had used it" is not supported here.
 
-Raw per-trial JSON for every run, including this one, is committed under
-`bench/results/`. See `bench/README.md` for the pre-registration.
+### Honest caveats, in both directions
+
+1. **n=5 with wide variance.** The subgroup comparison above rests on n=3 vs
+   n=2. It is suggestive, not conclusive.
+2. **A 2-session task may be too short to amortize.** legendary pays a write
+   cost in session 1 and can only recover it in later sessions. Two sessions is
+   the worst case for a memory tool; the interesting curve is at 4+.
+3. **The benchmark tested a configuration this project does not recommend.**
+   Only the MCP server was enabled. The `PreToolUse` surface hook - the
+   mechanism specifically designed to deliver memories *without* relying on the
+   agent choosing to call `recall` - was **not** configured. That is a real gap
+   between what we ship and what we measured, and it is our error, not a
+   defence of the result.
+
+### What this changes
+
+The result stands for the configuration tested: **on a two-session task with
+MCP tools alone, legendary costs more and prevents nothing.** Until a run with
+the hook enabled says otherwise, no token or cost claim belongs in this
+project's marketing.
+
+The next run should (a) enable the `PreToolUse` hook, (b) extend to 4+ sessions
+so the write cost has a chance to amortise, and (c) persist session transcripts
+so we can see whether `recall` was ever called in session 2 - the current
+harness discards them, which is why that question is still open.
+
+Raw per-trial JSON for all ten runs is in `bench/results/`.
