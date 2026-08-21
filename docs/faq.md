@@ -1,42 +1,46 @@
 # FAQ
 
 **Does my code get sent anywhere?**
-No. Anchoring, hashing, indexing, and retrieval are entirely local. The only
-feature that calls an LLM is the optional `legendary extract`, which runs your
-own local `claude` CLI.
+No. Anchoring, hashing, indexing, retrieval, and both hooks are entirely local.
+v0.2 removed the one feature that called an LLM.
 
-**Do I need an API key?**
-No.
+**Do I need an API key or a vector database?**
+No and no. Retrieval is SQLite FTS5 plus anchor and trigger matching.
 
-**Do I need a vector database or embeddings?**
-No. Retrieval is SQLite FTS5 plus anchor matching. This keeps recall
-deterministic and instant, and keeps install to a single command. Optional
-local embeddings are on the roadmap, not a requirement.
+**Where did `extract` and `inject` go?**
+Deleted in v0.2. `extract` was an LLM pass over session transcripts — write-side
+sophistication that the evidence says buys 3-8 points where retrieval buys 20,
+and its fallback path silently saved unanchored, unverifiable memories.
+`inject` dumped memories at session start, the point of maximum context
+dilution; it was never once referenced in our benchmark transcripts.
+
+**Where did `convention` and `reference` types go?**
+Also deleted. CLAUDE.md and your docs already hold that knowledge, and hosts
+inject CLAUDE.md for free. Memories written under those types in v0.1 load as
+`decision`.
+
+**Why does an episode need triggers?**
+Because otherwise it can never be pushed — only searched, which is the weakest
+channel. The trigger is what lets the memory resurface at the moment the same
+failure happens again.
 
 **Should memories be committed to git?**
-Yes - that is the team-sharing mechanism. Your teammate clones the repo and
-their agent immediately has your decisions and failed attempts. The index
-(`index.db`) is gitignored and rebuilds itself.
-
-**What happens on merge conflicts?**
-Rarely an issue: one file per memory, and ids are content-derived rather than
-sequential, so two people adding memories on separate branches do not collide.
+Yes. That is the team-sharing mechanism: your teammate clones the repo and
+their agent immediately has your failed attempts. The index is gitignored and
+rebuilds itself.
 
 **Why return stale memories at all instead of hiding them?**
-Because the reasoning usually outlives the code. "We chose X because Y" stays
-useful after a refactor moves the code. Hiding it loses knowledge; flagging it
-lets the agent judge.
+Because the reasoning usually outlives the code. Hiding it loses knowledge;
+flagging it lets the agent judge.
 
-**What languages are supported for symbol anchoring?**
-Python, JavaScript, TypeScript, and TSX. Anchoring by line range or whole file
-works for any language, and unsupported files degrade gracefully.
+**What languages support symbol anchoring?**
+Python, JavaScript, TypeScript, TSX. Line-range and whole-file anchoring work
+for any language, and unsupported files degrade gracefully rather than failing.
 
-**How is this different from just writing things in CLAUDE.md?**
-CLAUDE.md is unstructured, unsearchable, loaded in full every session, and has
-no idea when its claims stop being true. legendary is searchable, ranked,
-surfaced only when relevant, and self-invalidating.
+**Does legendary make my agent faster or cheaper?**
+Unproven, and we will not claim it until a valid benchmark says so. Our first
+attempt was retracted for measuring nothing — see [benchmark](benchmark.md).
 
 **Is it production-ready?**
-It is v1. The core (anchoring, staleness, recall, MCP, CLI) is tested and
-working. Expect the roadmap items - richer extraction, more languages, import-
-graph reranking - to land incrementally.
+v0.2 is a breaking redesign of a young tool. The core — anchoring, staleness,
+push delivery — is tested and works. Expect the API to keep moving.

@@ -29,32 +29,42 @@ decisions, and repeats debugging attempts that already failed. Memory
 frameworks remember conversations but are code-blind - a memory never knows it
 was about `src/sync/worker.py:120` and never notices when that code changes.
 
-legendary merges the two sides:
+legendary is a **delivery-and-verification layer**: it holds the knowledge that
+has no home in your codebase, and pushes it back — verified — at the moment the
+agent needs it.
 
-- **Anchored** - memories link to a file / symbol / line range at a commit
-- **Staleness-aware** - when the anchored code changes, recall flags the
-  memory `stale`; when it disappears, `orphaned`
-- **Typed** - `decision` (why it is this way), `episode` (tried X, failed
-  because Y), `convention`, `reference`
-- **Git-native** - memories are markdown files in `.legendary/memories/`,
-  committed with your code, diffable in PRs, shared with your whole team
-- **Local-first** - no cloud, no accounts, no API keys, no embeddings;
-  SQLite FTS5 does search
+- **Pushed, not fetched** - hooks deliver memories when the agent opens a file
+  or when a failure it has seen before reappears. No `recall` call required.
+- **Verified** - every memory is anchored to a file/symbol/commit and
+  content-hashed; when that code changes, the memory arrives flagged `stale`
+- **Two types** - `decision` (why it is this way) and `episode` (tried X,
+  failed because Y). Conventions belong in CLAUDE.md; docs belong in docs.
+- **Git-native** - markdown in `.legendary/memories/`, committed with your
+  code, reviewed in PRs, shared with your team
+- **Local-first** - no cloud, no accounts, no API keys, no embeddings
 
 ## The 30-second demo
 
+Your agent hits an error it has hit before. Without being asked, legendary
+interrupts with what you already learned:
+
 ```console
-$ legendary recall "strip None"
-strip() breaks on None   [fresh]
-
-$ vim app.py     # edit the anchored function
-
-$ legendary recall "strip None"
-strip() breaks on None   [stale - parse changed since 8fa2c31]
+$ # agent runs the tests, sees: AttributeError: 'NoneType' has no attribute 'strip'
+This failure has been seen before. Recorded episodes:
+- [episode] strip() crashes on None (verified against current code):
+  Use a guard: data.strip() if data else "". Retries do not help.
 ```
 
-That flag is the whole point. Every other memory system would still serve you
-that memory with full confidence.
+Then someone changes the anchored function. The same memory now arrives with
+its trust downgraded:
+
+```console
+- [episode] strip() crashes on None [stale - code changed since this was
+  written; verify before trusting]: ...
+```
+
+That flag is the point. Every other memory system would keep asserting the
+stale claim as fact.
 
 ## Quick start
 
@@ -63,36 +73,46 @@ cd your-repo
 uvx --from legendary-mcp legendary init   # scaffolds .legendary/, prints MCP + hook setup
 ```
 
-Add the printed MCP snippet to your client (Claude Code, Cursor, any MCP
-host). Your agent now has five tools:
+`init` installs the hooks for you — that is the primary channel, and it needs
+no agent cooperation:
 
-| Tool | Purpose |
-|---|---|
-| `remember` | save a memory anchored to code |
-| `recall` | search; results carry fresh/stale/orphaned flags |
-| `list_memories` | browse by type/tag/file |
-| `deprecate` | soft-delete with a reason |
-| `stale_report` | all memories whose code moved on |
+| Hook | Fires when | Delivers |
+|---|---|---|
+| `PreToolUse` | agent reads/edits a file | memories anchored to that file |
+| `PostToolUse` | a Bash result contains a stored error signature | the episode that recorded that failure |
 
-Optional auto-capture (Claude Code): the printed hooks run
-`legendary inject` at session start (context injection) and
-`legendary extract` at session end (LLM pass over the transcript, saved with
-`source: auto-extract` provenance).
+Optionally, paste the printed MCP snippet for agent-initiated search. Three
+tools: `remember`, `recall`, `deprecate`.
+
+## How memories reach the agent
+
+Two push channels, both installed by `init`:
+
+**File-touch** (`surface`) — the agent opens `sync/worker.py`, and any memory
+anchored there is injected before the tool call completes.
+
+**Error-signature** (`guard`) — every `episode` stores the verbatim error
+strings that produced it. When one reappears in a command's output, that
+episode is pushed back. This is why episodes *require* triggers: an agent acts
+on retrieved experience when the current situation resembles the recorded one,
+and a recurring error message is the strongest resemblance signal there is.
+
+Both dedupe per session, and both render imperatively — `(verified against
+current code)` when the anchor still hashes, `[stale - ... verify before
+trusting]` when it does not.
 
 ## CLI
 
-`legendary init | search <q> | reindex | doctor | extract [transcript] | inject | mcp`
-
-`legendary mcp` serves stdio by default; `--transport http` serves stateless
-streamable HTTP for containers and shared team deployments.
+`legendary init | search <q> | reindex | doctor | surface | guard | mcp`
 
 ## Recall quality
 
 Search uses SQLite FTS5 with Porter stemming, so an agent asking about
-`deadlock` finds a memory that says "deadlocked", and `transactions` finds
-"transaction" - word-form drift between how you ask and how it was written
-doesn't lose the memory. Ranking combines text relevance, overlap with the
-files you're editing, recency, and a penalty for staleness.
+`deadlock` finds a memory that says "deadlocked". Ranking is text relevance
+plus overlap with the files you're editing, minus a staleness penalty — fixed
+weights, no tuning. Recency is deliberately absent: a memory whose anchor still
+hashes fresh has *survived*, and penalizing it for age would double-count what
+staleness already measures.
 
 ## How staleness works
 
@@ -115,15 +135,18 @@ flowchart TB
     end
 
     subgraph legendary["legendary (uvx --from legendary-mcp)"]
-        mcp["MCP server<br/>remember - recall - list_memories<br/>deprecate - stale_report"]
-        cli["CLI<br/>init - search - reindex - doctor<br/>extract - inject"]
+        subgraph push["push channel - primary, no agent cooperation"]
+            surface["surface<br/>PreToolUse: file touched"]
+            guard["guard<br/>PostToolUse: error signature seen"]
+        end
+        mcp["MCP add-on<br/>remember - recall - deprecate"]
         svc["service layer"]
         subgraph core["core"]
             store["markdown store"]
-            index["SQLite FTS5 index"]
+            index["FTS5 index + triggers"]
             anchor["anchor resolve + hash"]
             stale["staleness verdicts"]
-            rank["weighted ranking"]
+            rank["ranking"]
         end
     end
 
@@ -132,10 +155,14 @@ flowchart TB
         db["index.db - gitignored"]
     end
 
-    agent -- "MCP tools (stdio)" --> mcp
-    agent -. "session hooks" .-> cli
+    agent -- "Read/Edit/Write" --> surface
+    agent -- "Bash output" --> guard
+    surface -- "injected memories" --> agent
+    guard -- "this failed before" --> agent
+    agent -. "optional search" .-> mcp
+    surface --> svc
+    guard --> svc
     mcp --> svc
-    cli --> svc
     svc --> store
     svc --> index
     svc --> anchor
@@ -174,9 +201,11 @@ anchors:
     commit: 8fa2c31
     content_hash: sha256:9f8e...
 tags: [sqlite, concurrency]
+triggers:
+  - "sqlite3.OperationalError: database is locked"
 ---
-Tried wrapping retries in a transaction (attempt 1) - deadlocks under WAL.
-Working approach: PRAGMA busy_timeout.
+Tried wrapping retries in a deferred transaction - SQLITE_BUSY on lock upgrade,
+and busy_timeout cannot help. Working approach: BEGIN IMMEDIATE.
 ```
 
 Human-readable, PR-reviewable, and it merges like code.
@@ -198,11 +227,12 @@ makes **no performance claim** until a valid benchmark exists.
 |---|---|---|---|
 | Models code structure | yes | no | anchors only |
 | Remembers decisions | no | yes | yes |
-| Remembers failed attempts | no | partly | yes (`episode`) |
+| Remembers failed attempts | no | partly | yes (`episode` + triggers) |
 | Memories tied to code entities | n/a | no | yes |
 | Detects when a memory goes stale | n/a | no | yes |
 | Team-shared via git | graph committed | no (service) | yes |
 | Retrieval needs an LLM | no | embeddings | no |
+| Pushes memory without being asked | no | no | yes (hooks) |
 
 Code-graph tools answer "what is this code?"; legendary answers "what do we
 already know about it, and is that still true?" Running both is a good setup.

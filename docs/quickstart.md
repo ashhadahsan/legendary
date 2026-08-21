@@ -1,18 +1,22 @@
 # Quickstart
 
-## Install and initialize
+## Install
 
 ```bash
 cd your-repo
 uvx --from legendary-mcp legendary init
 ```
 
-This creates `.legendary/`, gitignores the derived index, and prints the MCP
-and hook configuration to paste into your agent.
+That creates `.legendary/`, gitignores the derived index, and **installs both
+hooks** into `.claude/settings.json` — merging into your existing settings
+without touching anything else you have configured there.
 
-## Connect your agent
+You are done. The hooks are the primary channel and need no agent cooperation.
 
-Add the printed snippet to your MCP client. For Claude Code, `.mcp.json`:
+## Optional: agent-initiated search
+
+`init` also prints an MCP snippet. Add it to `.mcp.json` if you want the agent
+to be able to search memory deliberately, on top of what gets pushed:
 
 ```json
 {
@@ -25,9 +29,12 @@ Add the printed snippet to your MCP client. For Claude Code, `.mcp.json`:
 }
 ```
 
-## See staleness work (the 2-minute "aha")
+Three tools: `remember`, `recall`, `deprecate`.
 
-Save a memory anchored to a function:
+## Record your first episode
+
+Episodes are the point of the tool, and they **require triggers** — the
+verbatim error strings you observed:
 
 ```python
 from pathlib import Path
@@ -37,34 +44,20 @@ service.remember(
     repo_root=Path("."),
     type="episode",
     title="strip() crashes on None",
-    body="Tried data.strip() directly - crashes when data is None. Guard first.",
+    body="Use a guard: data.strip() if data else ''. Retries do not help.",
     anchors=[{"file": "app.py", "symbol": "parse"}],
+    triggers=["AttributeError: 'NoneType' object has no attribute 'strip'"],
 )
 ```
 
-Recall it - it is `fresh`:
+Now the next time any command prints that error, the episode is pushed back
+automatically. Without the trigger there is nothing to match on, which is why
+legendary refuses to save an episode that omits it.
 
-```bash
-legendary search "strip None"
-```
+## See verification work
 
-Now edit `parse` in `app.py` and recall again. The same memory comes back
-flagged `stale`, because the hash of the anchored region no longer matches.
+Edit the anchored function, then trigger the error again. The same memory
+returns marked `[stale - code changed since this was written; verify before
+trusting]`.
 
-## Automatic surfacing (recommended)
-
-The biggest failure mode of agent memory is that agents forget to *ask* for it.
-The `PreToolUse` hook removes that problem: whenever the agent reads or edits a
-file, memories anchored to it are injected automatically.
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [{"matcher": "Read|Edit|Write",
-      "hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary surface --repo /path/to/your-repo"}]}]
-  }
-}
-```
-
-Memories are deduplicated per session, so you see each one once.
+Run `legendary doctor` any time for every memory whose code has moved on.
