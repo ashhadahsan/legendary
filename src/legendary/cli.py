@@ -1,4 +1,4 @@
-"""legendary CLI: init | search | reindex | doctor | extract | inject | mcp."""
+"""legendary CLI: init | search | reindex | doctor | surface | mcp."""
 
 from __future__ import annotations
 
@@ -38,11 +38,7 @@ Claude Code hooks (.claude/settings.json) for auto-capture:
   "hooks": {
     "PreToolUse": [{"matcher": "Read|Edit|Write",
       "hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary surface --repo %s"}]}],
-    "SessionStart": [{"hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary inject --repo %s"}]}],
-    "SessionEnd": [{"hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary extract --repo %s"}]}]
+      "command": "uvx --from legendary-mcp legendary surface --repo %s"}]}]
   }
 }
 
@@ -79,7 +75,7 @@ def _cmd_init(repo: Path) -> int:
         )
     idx.rebuild(repo)
     print(f"initialized .legendary/ in {repo}\n")
-    print(_MCP_SNIPPET % (repo, repo, repo, repo))
+    print(_MCP_SNIPPET % (repo, repo))
     return 0
 
 
@@ -105,47 +101,6 @@ def _cmd_doctor(repo: Path) -> int:
             if a["staleness"] != "fresh":
                 where = a.get("symbol") or a["file"]
                 print(f"    {a['staleness']}: {where} (was {a.get('commit', '?')})")
-    return 0
-
-
-def _cmd_extract(repo: Path, transcript: str | None) -> int:
-    from legendary.extract import extract_from_transcript
-
-    path = transcript
-    if path is None:
-        # Claude Code hooks pass JSON on stdin including transcript_path
-        try:
-            hook_input = json.load(sys.stdin)
-            path = hook_input.get("transcript_path")
-        except Exception:
-            path = None
-    if not path:
-        print("error: no transcript (pass a path or pipe hook JSON)", file=sys.stderr)
-        return 1
-    try:
-        saved = extract_from_transcript(repo, Path(path))
-    except RuntimeError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    print(f"extracted {len(saved)} memories: {', '.join(saved) if saved else '-'}")
-    return 0
-
-
-def _cmd_inject(repo: Path, k: int) -> int:
-    """Print top memories for session-start context injection."""
-    items = service.list_memories(repo)
-    if not items:
-        return 0
-    items.sort(key=lambda m: m["created"], reverse=True)
-    conventions = [m for m in items if m["type"] == "convention"][:k]
-    recent = [m for m in items if m["type"] != "convention"][:k]
-    from legendary.store import load
-
-    print("# Legendary memories for this repo (use `recall` tool for more)\n")
-    for m in conventions + recent:
-        full = load(repo, m["id"])
-        if full:
-            print(f"- [{full.type}] {full.title}: {full.body[:200]}")
     return 0
 
 
@@ -241,10 +196,6 @@ def main(argv: list[str] | None = None) -> int:
     p_search.add_argument("-k", type=int, default=5)
     _add_repo(sub.add_parser("reindex"))
     _add_repo(sub.add_parser("doctor"))
-    p_extract = _add_repo(sub.add_parser("extract"))
-    p_extract.add_argument("transcript", nargs="?", default=None)
-    p_inject = _add_repo(sub.add_parser("inject"))
-    p_inject.add_argument("-k", type=int, default=5)
     _add_repo(sub.add_parser("surface"))
     p_mcp = _add_repo(sub.add_parser("mcp"))
     p_mcp.add_argument(
@@ -267,10 +218,6 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_reindex(repo)
         case "doctor":
             return _cmd_doctor(repo)
-        case "extract":
-            return _cmd_extract(repo, args.transcript)
-        case "inject":
-            return _cmd_inject(repo, args.k)
         case "surface":
             return _cmd_surface(repo)
         case "mcp":

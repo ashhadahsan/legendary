@@ -16,7 +16,6 @@ def test_init_scaffolds(repo: Path, capsys):
     assert (repo / ".legendary" / "config.toml").exists()
     assert ".legendary/index.db" in (repo / ".gitignore").read_text()
     assert "mcpServers" in out  # prints MCP setup snippet
-    assert "SessionEnd" in out  # prints hook snippet
 
 
 def test_init_twice_is_safe(repo: Path, capsys):
@@ -63,16 +62,3 @@ def test_doctor_reports_stale(repo: Path, capsys):
     code, out = run_cli("doctor", cwd=repo, capsys=capsys)
     assert code == 0
     assert "stale" in out
-
-
-def test_inject_prints_memories(repo: Path, capsys):
-    seed(repo)
-    code, out = run_cli("inject", cwd=repo, capsys=capsys)
-    assert code == 0
-    assert "wal deadlock" in out
-
-
-def test_inject_empty_repo_prints_nothing(repo: Path, capsys):
-    code, out = run_cli("inject", cwd=repo, capsys=capsys)
-    assert code == 0
-    assert out.strip() == ""

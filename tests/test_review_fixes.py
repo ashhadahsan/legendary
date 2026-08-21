@@ -102,13 +102,6 @@ def test_unresolvable_symbol_still_rejected_in_supported_language(repo: Path):
         resolve_and_hash(repo, Anchor(file="src/sync/worker.py", symbol="NoSuchThing"))
 
 
-def test_missing_transcript_reports_the_real_problem(repo: Path):
-    from legendary.extract import extract_from_transcript
-
-    with pytest.raises(RuntimeError, match="transcript not found"):
-        extract_from_transcript(repo, repo / "does_not_exist.jsonl")
-
-
 @pytest.mark.parametrize("bad_id", ["../../etc/passwd", "..", "a/b", "x\\y", ""])
 def test_memory_id_traversal_rejected(repo: Path, bad_id: str):
     with pytest.raises(ValueError, match="invalid memory id"):
