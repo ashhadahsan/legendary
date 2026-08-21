@@ -37,19 +37,10 @@ def _failures(rec: dict) -> list[str]:
     return fails
 
 
-def main() -> int:
-    runs: dict[str, list[dict]] = {}
-    for path in sorted(RESULTS.glob("*.json")):
-        rec = json.loads(path.read_text())
-        if "s2_quirk_hits" not in rec:
-            continue  # v1-schema result, retracted; kept in git, not aggregated
-        runs.setdefault(rec["arm"], []).append(rec)
-    if not runs:
-        print("no v2 results yet - run run_bench.py first")
-        return 1
-
+def _table(runs: dict[str, list[dict]], label: str) -> None:
+    print(f"\n### {label}\n")
     print(
-        "| arm | n | excluded | median s2 quirk hits | s2 hit at all | "
+        "| arm | n | excluded | median s2 rediscoveries | s2 hit at all | "
         "median s2 cost | median s2 turns | s2 correct |"
     )
     print("|---|---|---|---|---|---|---|---|")
@@ -60,24 +51,38 @@ def main() -> int:
         ok = [r for r in rs if not _failures(r)]
         excluded = len(rs) - len(ok)
         if not ok:
-            print(f"| {arm} | 0 | {excluded} | - | - | - | - |")
+            print(f"| {arm} | 0 | {excluded} | - | - | - | - | - |")
             continue
+        hits = [r["s2_quirk_hits"] for r in ok]
         costs = [r["session_2"].get("cost_usd") or 0 for r in ok]
         turns = [r["session_2"].get("num_turns") or 0 for r in ok]
-        # the COUNT is the signal - how many times the agent rediscovered the
-        # quirk the hard way. A binary "did it happen" throws that away.
-        hits = [r["s2_quirk_hits"] for r in ok]
-        quirk_any = sum(1 for h in hits if h > 0)
-        correct = sum(1 for r in ok if r["s2_correct"])
         print(
             f"| {arm} | {len(ok)} | {excluded} | "
-            f"**{statistics.median(hits):.1f}** "
-            f"(range {min(hits)}-{max(hits)}) | "
-            f"{quirk_any}/{len(ok)} | "
-            f"${statistics.median(costs):.2f} | "
-            f"{statistics.median(turns):.0f} | "
-            f"{correct}/{len(ok)} |"
+            f"**{statistics.median(hits):.1f}** (range {min(hits)}-{max(hits)}) | "
+            f"{sum(1 for h in hits if h > 0)}/{len(ok)} | "
+            f"${statistics.median(costs):.2f} | {statistics.median(turns):.0f} | "
+            f"{sum(1 for r in ok if r['s2_correct'])}/{len(ok)} |"
         )
+
+
+def main() -> int:
+    by_scenario: dict[str, dict[str, list[dict]]] = {}
+    pooled: dict[str, list[dict]] = {}
+    for path in sorted(RESULTS.glob("*.json")):
+        rec = json.loads(path.read_text())
+        if "s2_quirk_hits" not in rec:
+            continue  # v1-schema result, retracted; kept in git, not aggregated
+        scen = rec.get("scenario", "opaque_service")
+        by_scenario.setdefault(scen, {}).setdefault(rec["arm"], []).append(rec)
+        pooled.setdefault(rec["arm"], []).append(rec)
+    if not pooled:
+        print("no v2 results yet - run run_bench.py first")
+        return 1
+    # every scenario is published, whether or not it favours legendary
+    for scen in sorted(by_scenario):
+        _table(by_scenario[scen], scen)
+    if len(by_scenario) > 1:
+        _table(pooled, "pooled (all scenarios)")
     return 0
 
 

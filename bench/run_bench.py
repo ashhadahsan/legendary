@@ -27,19 +27,51 @@ import time
 from pathlib import Path
 
 BENCH = Path(__file__).parent
-SCENARIO = BENCH / "scenario2"
 RESULTS = BENCH / "results"
 
-SESSION_1 = (
-    "test_billing_reconciliation in tests/test_billing.py fails. Diagnose and "
-    "fix billing/client.py so `pytest tests/test_billing.py` passes. The "
-    "payments service URL is in the MOCKPAY_URL env var. Do not modify tests."
-)
-SESSION_2 = (
-    "Implement billing/refunds.py so `pytest tests/test_refunds.py` passes. "
-    "The payments service URL is in the MOCKPAY_URL env var. Do not modify "
-    "tests."
-)
+# Each scenario must clear the same four bars (see the generalization spec):
+# unrecoverable from the repo, behavioral metric, plausible fixes genuinely
+# fail, hard reset between sessions.
+SCENARIOS = {
+    "opaque_service": {
+        "dir": "scenario2",
+        "needs_server": True,
+        "session_1": (
+            "test_billing_reconciliation in tests/test_billing.py fails. "
+            "Diagnose and fix billing/client.py so `pytest "
+            "tests/test_billing.py` passes. The payments service URL is in the "
+            "MOCKPAY_URL env var. Do not modify tests."
+        ),
+        "session_2": (
+            "Implement billing/refunds.py so `pytest tests/test_refunds.py` "
+            "passes. The payments service URL is in the MOCKPAY_URL env var. "
+            "Do not modify tests."
+        ),
+        "s1_tests": "tests/test_billing.py",
+        "s2_tests": "tests/test_refunds.py",
+        # the pattern must not exist in the fixture, or reading scores as doing
+        "leak_grep": ("float", "billing"),
+    },
+    "reverted_approach": {
+        "dir": "scenario3",
+        "needs_server": False,
+        "session_1": (
+            "test_warm_cache_completes_before_deadline in tests/test_warm.py "
+            "fails. Diagnose and fix cache/warm.py so `pytest "
+            "tests/test_warm.py` passes. Do not modify tests."
+        ),
+        "session_2": (
+            "cache/refresh.py has the same problem as warm.py had: make "
+            "`pytest tests/test_refresh.py` pass. Do not modify tests."
+        ),
+        "s1_tests": "tests/test_warm.py",
+        "s2_tests": "tests/test_refresh.py",
+        # negative knowledge: the failed approach leaves no trace in the repo,
+        # so this string can only appear in the diff if the agent WROTE it
+        "dead_end_diff": "Thread(target=",
+        "leak_grep": ("Thread(target=", "cache"),
+    },
+}
 
 ARMS = {
     "baseline": [],
@@ -143,6 +175,23 @@ def run_session(repo: Path, prompt: str, config_path: Path, mock_url: str) -> di
     }
 
 
+def dead_end_diff_hits(repo: Path, pattern: str) -> int:
+    """Count occurrences of a dead-end pattern in what the agent WROTE.
+
+    Safe only because the grep gate proves the pattern is absent from the
+    fixture: an unchanged file never appears in `git diff`, so a match here is
+    authorship, not reading. This is the distinction v1's metric missed.
+    """
+    diff = subprocess.run(
+        ["git", "diff"], cwd=repo, capture_output=True, text=True
+    ).stdout
+    return sum(
+        1
+        for line in diff.splitlines()
+        if line.startswith("+") and pattern.lower() in line.lower()
+    )
+
+
 def quirk_hits(log_path: Path, since_line: int) -> tuple[int, int]:
     """(#requests with dropped float amounts, new line count) since a marker."""
     if not log_path.exists():
@@ -179,11 +228,12 @@ def reset_repo(repo: Path, arm: str) -> None:
     )
 
 
-def trial(arm: str, index: int, workdir: Path) -> dict:
-    repo = workdir / f"{arm}-{index}"
+def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
+    cfg = SCENARIOS[scenario]
+    repo = workdir / f"{scenario}-{arm}-{index}"
     if repo.exists():
         shutil.rmtree(repo)
-    shutil.copytree(SCENARIO, repo)
+    shutil.copytree(BENCH / cfg["dir"], repo)
     git(repo, "init", "-q", "-b", "main")
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "scenario")
@@ -207,16 +257,19 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
             capture_output=True,
         )
 
-    log_path = workdir / f"{arm}-{index}-mockpay.jsonl"
-    port = free_port()
-    mock_url = f"http://127.0.0.1:{port}"
-    server = subprocess.Popen(
-        ["python3", str(BENCH / "mockpay.py"), str(port), str(log_path)]
-    )
-    time.sleep(0.5)
+    log_path = workdir / f"{scenario}-{arm}-{index}-mockpay.jsonl"
+    server = None
+    mock_url = ""
+    if cfg["needs_server"]:
+        port = free_port()
+        mock_url = f"http://127.0.0.1:{port}"
+        server = subprocess.Popen(
+            ["python3", str(BENCH / "mockpay.py"), str(port), str(log_path)]
+        )
+        time.sleep(0.5)
     try:
-        s1 = run_session(repo, SESSION_1, config_path, mock_url)
-        s1_correct = tests_pass(repo, mock_url, "tests/test_billing.py")
+        s1 = run_session(repo, cfg["session_1"], config_path, mock_url)
+        s1_correct = tests_pass(repo, mock_url, cfg["s1_tests"])
         _, log_marker = quirk_hits(log_path, 0)
 
         wrote_memory = (
@@ -227,16 +280,20 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
 
         reset_repo(repo, arm)
 
-        s2 = run_session(repo, SESSION_2, config_path, mock_url)
-        s2_quirk_hits, _ = quirk_hits(log_path, log_marker)
-        s2_correct = tests_pass(repo, mock_url, "tests/test_refunds.py")
+        s2 = run_session(repo, cfg["session_2"], config_path, mock_url)
+        if cfg["needs_server"]:
+            s2_quirk_hits, _ = quirk_hits(log_path, log_marker)
+        else:
+            s2_quirk_hits = dead_end_diff_hits(repo, cfg["dead_end_diff"])
+        s2_correct = tests_pass(repo, mock_url, cfg["s2_tests"])
         hook_fired = (
             bool(list((repo / ".legendary").glob(".surfaced-*")))
             if "hook" in tools
             else None
         )
     finally:
-        server.terminate()
+        if server is not None:
+            server.terminate()
 
     # ---- arm-activation assertions: a trial that did not run its declared
     # configuration is classified, not silently averaged in ----
@@ -259,6 +316,7 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
             activation_failures.append("no_memory_written_in_s1")
 
     return {
+        "scenario": scenario,
         "arm": arm,
         "trial": index,
         "session_1": s1,
@@ -277,25 +335,36 @@ def main() -> int:
     ap.add_argument("--arms", nargs="+", default=list(ARMS), choices=list(ARMS))
     ap.add_argument("-n", "--trials", type=int, default=10)
     ap.add_argument("--workdir", type=Path, required=True)
+    ap.add_argument("--scenario", default="opaque_service", choices=list(SCENARIOS))
     args = ap.parse_args()
 
-    # grep gate: the fixture must not contain quirk hints (pre-registered)
+    # grep gate: the fixture must not contain the pattern the metric looks for,
+    # or reading a file scores as committing the mistake (v1's fatal defect)
+    cfg = SCENARIOS[args.scenario]
+    pattern, subdir = cfg["leak_grep"]
     leak = subprocess.run(
-        ["grep", "-ri", "float", str(SCENARIO / "billing")], capture_output=True
+        ["grep", "-ri", pattern, str(BENCH / cfg["dir"] / subdir)],
+        capture_output=True,
     )
     if leak.returncode == 0:
-        raise SystemExit(f"fixture leaks the quirk:\n{leak.stdout.decode()}")
+        raise SystemExit(
+            f"fixture leaks the metric pattern {pattern!r}:\n{leak.stdout.decode()}"
+        )
 
     RESULTS.mkdir(exist_ok=True)
     args.workdir.mkdir(parents=True, exist_ok=True)
     for i in range(args.trials):
         for arm in args.arms:  # interleaved: interruption keeps arms balanced
-            print(f"running {arm} trial {i + 1}/{args.trials}...", flush=True)
-            record = trial(arm, i, args.workdir)
+            print(
+                f"running {args.scenario}/{arm} trial {i + 1}/{args.trials}...",
+                flush=True,
+            )
+            record = trial(arm, i, args.workdir, args.scenario)
+            stem = f"{args.scenario}-{arm}-{i}"
             for key in ("session_1", "session_2"):
                 text = record[key].pop("transcript", "")
-                (RESULTS / f"{arm}-{i}-{key}.txt").write_text(text)
-            (RESULTS / f"{arm}-{i}.json").write_text(json.dumps(record, indent=2))
+                (RESULTS / f"{stem}-{key}.txt").write_text(text)
+            (RESULTS / f"{stem}.json").write_text(json.dumps(record, indent=2))
             print(
                 f"  s2_quirk_hits={record['s2_quirk_hits']} "
                 f"s2_correct={record['s2_correct']} "
