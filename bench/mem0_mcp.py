@@ -45,8 +45,20 @@ def build_server(repo_root: Path) -> MCPServer:
         "history_db_path": str(repo_root / ".mem0" / "history.db"),
     }
     if not os.environ.get("OPENAI_API_KEY") and os.environ.get("GEMINI_API_KEY"):
-        config["llm"] = {"provider": "gemini", "config": {}}
-        config["embedder"] = {"provider": "gemini", "config": {}}
+        # mem0's built-in gemini defaults point at retired models, so the
+        # current ones are pinned here. This helps mem0, not us.
+        config["llm"] = {
+            "provider": "gemini",
+            "config": {"model": os.environ.get("MEM0_GEMINI_LLM", "gemini-3.6-flash")},
+        }
+        config["embedder"] = {
+            "provider": "gemini",
+            "config": {
+                "model": os.environ.get(
+                    "MEM0_GEMINI_EMBED", "models/gemini-embedding-001"
+                )
+            },
+        }
         # gemini embeddings are 768-dim; qdrant must be told, or writes fail
         config["vector_store"]["config"]["embedding_model_dims"] = 768
     memory = Memory.from_config(config)
@@ -69,7 +81,7 @@ def build_server(repo_root: Path) -> MCPServer:
     @mcp.tool()
     def search_memory(query: str, limit: int = 5) -> str:
         """Search stored memories relevant to the current task."""
-        result = memory.search(query, user_id=user_id, limit=limit)
+        result = memory.search(query, filters={"user_id": user_id}, limit=limit)
         return json.dumps(result, default=str)
 
     return mcp
