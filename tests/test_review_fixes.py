@@ -119,7 +119,7 @@ def test_recall_k_above_default_limit_is_honoured(repo: Path):
             repo,
             Memory(
                 id=f"mem-{n:03d}",
-                type="reference",
+                type="decision",
                 title=f"widget note {n}",
                 body="the same widget body text",
                 created=datetime(2026, 8, 1, tzinfo=timezone.utc),
@@ -134,7 +134,7 @@ def test_recall_k_above_default_limit_is_honoured(repo: Path):
 def test_unicode_round_trips_through_the_store(repo: Path):
     m = Memory(
         id="mem-uni",
-        type="convention",
+        type="decision",
         title="naïve café — déjà vu ✓",
         body="日本語のメモ, emoji 🎯, and «guillemets»",
         created=datetime(2026, 8, 1, tzinfo=timezone.utc),
@@ -188,13 +188,13 @@ def test_upsert_populates_index_on_fresh_clone(repo: Path):
     for n in range(4):
         service.remember(
             repo_root=repo,
-            type="reference",
+            type="decision",
             title=f"clone note {n}",
             body="cloned body",
         )
     db_path(repo).unlink()  # simulate the gitignored index being absent
     service.remember(
-        repo_root=repo, type="reference", title="clone note new", body="cloned body"
+        repo_root=repo, type="decision", title="clone note new", body="cloned body"
     )
     assert len(search(repo, "cloned body", limit=100)) == 5
 

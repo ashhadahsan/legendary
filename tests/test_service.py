@@ -43,14 +43,14 @@ def test_list_memories_filters(repo: Path):
     remember_one(repo)
     service.remember(
         repo_root=repo,
-        type="convention",
+        type="decision",
         title="use uv",
         body="always uv",
         anchors=[],
         tags=["tooling"],
     )
     assert len(service.list_memories(repo)) == 2
-    assert len(service.list_memories(repo, type="convention")) == 1
+    assert len(service.list_memories(repo, type="decision")) == 1
     assert len(service.list_memories(repo, tag="sqlite")) == 1
     assert len(service.list_memories(repo, file="src/sync/worker.py")) == 1
 

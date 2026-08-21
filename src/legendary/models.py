@@ -9,7 +9,7 @@ from typing import Literal, Optional
 import yaml
 from pydantic import BaseModel, Field, field_validator
 
-MemoryType = Literal["decision", "episode", "convention", "reference"]
+MemoryType = Literal["decision", "episode"]
 MemorySource = Literal["agent", "auto-extract", "human"]
 MemoryStatus = Literal["active", "deprecated"]
 
@@ -37,6 +37,7 @@ class Memory(BaseModel):
     transcript: Optional[str] = None
     anchors: list[Anchor] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
+    triggers: list[str] = Field(default_factory=list)
 
     @field_validator("created")
     @classmethod
@@ -47,6 +48,16 @@ class Memory(BaseModel):
         repo (offset-naive vs offset-aware subtraction in rank.py).
         """
         return v if v.tzinfo is not None else v.replace(tzinfo=timezone.utc)
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _coerce_legacy_type(cls, v: object) -> object:
+        """v0.1 stores may contain convention/reference; both were declarative
+        knowledge, so they load as decision instead of failing validation and
+        silently vanishing from load_all."""
+        if v in ("convention", "reference"):
+            return "decision"
+        return v
 
     @staticmethod
     def new_id(title: str, created: datetime) -> str:

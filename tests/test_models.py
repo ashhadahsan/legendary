@@ -121,3 +121,29 @@ def test_from_markdown_rejects_unterminated_frontmatter():
 def test_from_markdown_rejects_non_mapping_frontmatter():
     with pytest.raises(ValueError, match="frontmatter is not a mapping"):
         Memory.from_markdown("---\n- a\n- b\n---\nbody\n")
+
+
+def test_legacy_types_coerce_to_decision():
+    # v0.1 stores may contain convention/reference; they must load, not vanish
+    for legacy in ("convention", "reference"):
+        m = Memory(
+            id="mem-legacy",
+            type=legacy,
+            title="old memory",
+            body="body",
+            created=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        )
+        assert m.type == "decision"
+
+
+def test_triggers_round_trip():
+    m = Memory(
+        id="mem-trig",
+        type="episode",
+        title="locked db",
+        body="body",
+        created=datetime(2026, 8, 1, tzinfo=timezone.utc),
+        triggers=["sqlite3.OperationalError: database is locked"],
+    )
+    loaded = Memory.from_markdown(m.to_markdown())
+    assert loaded.triggers == ["sqlite3.OperationalError: database is locked"]
