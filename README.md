@@ -210,16 +210,26 @@ and busy_timeout cannot help. Working approach: BEGIN IMMEDIATE.
 
 Human-readable, PR-reviewable, and it merges like code.
 
-## Benchmark: retracted
+## Benchmark
 
-An earlier n=5 run reported that legendary cost more than no memory at all. **That
-result has been withdrawn** - the fixture let session 2 recover the answer by
-reading the file session 1 had already fixed, and the headline metric matched
-strings present in the fixture's own source. It measured nothing.
+On a two-session task where the needed knowledge **cannot** be recovered from
+the repository (it lives in an opaque service, and the working tree is
+hard-reset between sessions), n=10 per arm:
 
-The raw data and a full account of the three defects are published at
-[benchmark](https://ashhadahsan.github.io/legendary/benchmark/). This project
-makes **no performance claim** until a valid benchmark exists.
+| arm | median rediscoveries in session 2 | range |
+|---|---|---|
+| no memory | **9.5** | 1-15 |
+| legendary | **1.0** | 0-2 |
+
+89 wasted requests versus 13. Exact permutation test: **p = 0.00015**.
+
+**It did not make anything cheaper** - median session-2 cost was identical
+($0.60 vs $0.60). The agent spent its saved effort inside the same budget. And
+correctness was 10/10 in both arms; the task is solvable either way.
+
+An earlier v1 benchmark reported the opposite and was **retracted for measuring
+nothing**. Full numbers, the retraction, the caveats, and a harness bug fixed
+mid-run in legendary's favour: [benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
 
 ## How this differs from other tools
 

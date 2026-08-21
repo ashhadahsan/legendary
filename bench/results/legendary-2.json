@@ -1,0 +1,40 @@
+{
+  "arm": "legendary",
+  "trial": 2,
+  "session_1": {
+    "cost_usd": 0.5497890000000001,
+    "num_turns": 16,
+    "output_tokens": 4284,
+    "duration_s": 258.4,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": true,
+    "used_remember": true,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "session_2": {
+    "cost_usd": 0.5644374999999999,
+    "num_turns": 13,
+    "output_tokens": 3601,
+    "duration_s": 56.4,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": true,
+    "used_remember": true,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "s1_correct": true,
+  "s2_correct": true,
+  "s2_quirk_hits": 1,
+  "wrote_memory": true,
+  "hook_fired": true,
+  "activation_failures": [
+    "mcp_tools_not_offered"
+  ]
+}

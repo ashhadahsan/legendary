@@ -51,60 +51,68 @@ uv run python bench/report.py
 This costs real API credits (40 agent sessions at the default settings) and is
 deliberately excluded from CI.
 
-## Results: RETRACTED (2026-08-15)
+## Results (n=10 per arm, 2026-08-21)
 
-**The n=5 run published earlier is withdrawn. It measured nothing, because of
-three defects in the harness and fixture - all ours.**
+**legendary reduced rediscovery ~9.5x.** Zero trials excluded; both channels
+activated in 10/10 legendary trials.
 
-The raw numbers stay in `bench/results/` and in git history. What is withdrawn
-is any inference from them, in either direction.
+| arm | n | median s2 quirk hits | range | s2 cost | s2 turns | s2 correct |
+|---|---|---|---|---|---|---|---|
+| baseline | 10 | **9.5** | 1-15 | $0.60 | 16 | 10/10 |
+| legendary | 10 | **1.0** | 0-2 | $0.60 | 14 | 10/10 |
 
-### Why it was invalid
+Raw per-trial counts:
 
-**1. The task did not require memory.** Session 1 fixes `sync/worker.py` with
-`BEGIN IMMEDIATE`. Session 2 then opens a repo where that fix is sitting in the
-sibling file. An agent can simply read `worker.py` and copy the pattern - no
-memory needed. We built a memory benchmark in which the codebase *is* the
-memory, so the baseline was never actually memory-less.
+```
+baseline:  [1, 6, 7, 7, 9, 10, 10, 12, 12, 15]   -> 89 wasted requests
+legendary: [0, 1, 1, 1, 1, 1,  2,  2,  2,  2]    -> 13
+```
 
-**2. `repeated_failure` was a false positive in every trial of both arms.**
-`DEAD_END_PATTERNS` included `busy_timeout` and `BUSY_TIMEOUT_MS`, which are
-present in the fixture's own `sync/db.py`. Any agent that read that file
-matched the pattern. The reported "5/5 repeated failures in both arms" was
-detecting agents *reading source code*, not agents repeating mistakes.
+Exact permutation test (one-sided, 20k resamples): **p = 0.00015**. The
+distributions barely touch - only baseline's best trial (1) reaches
+legendary's worst (2). One legendary trial rediscovered the quirk **zero**
+times: it recalled what the earlier session learned and got the request right
+first try.
 
-**3. (Corrected 2026-08-20.)** We first reported that the hook arm never fired
-the hook. That was wrong - our detection searched only *assistant* transcript
-events, while hook injections arrive as user-side context. The `.surfaced-*`
-cache files in both trial repos prove the hook fired. Verified independently:
-`.claude/settings.json` in a repo DOES activate PreToolUse hooks under headless
-`claude -p`, including with `--strict-mcp-config`, and in a clean single-file
-test the injected memory visibly shaped the answer. The hook arm's numbers
-remain uninterpretable anyway, because of defect 1.
+### What this does and does not show
 
-### What survives
+**Does:** on knowledge that provably cannot be recovered from the repository,
+pushed and verified memory stops an agent re-deriving what it already learned.
+That is measured behaviorally, from the mock server's own request log, on a
+metric that cannot match repository text.
 
-Only these, and they are weak:
+**Does not:** show a cost or token win. Median session-2 cost was **identical**
+($0.60 vs $0.60) and turns barely moved (16 vs 14). legendary spent its saved
+effort inside the same budget rather than finishing cheaper. Anyone quoting
+this as "legendary makes agents cheaper" is misreading it.
 
-- Token and cost totals were really measured. In this (invalid) task shape,
-  legendary cost more than baseline. That says nothing about tasks where memory
-  is actually required.
-- Agents did call `recall` and `remember` unprompted, from tool descriptions
-  alone. Delivery via MCP works.
-- The documented hook setup works: `.claude/settings.json` activates the
-  PreToolUse hook in headless mode (initially reported otherwise; corrected
-  above).
+**Correctness was unaffected** - 10/10 in both arms. This task is solvable
+either way; the difference is how much waste it takes.
 
-### What a valid benchmark requires
+### Caveats
 
-1. **Knowledge that cannot be recovered from the repo.** The insight must exist
-   only in the earlier session - e.g. an approach that was tried and reverted,
-   leaving no trace in the code, or an external constraint discovered at
-   runtime.
-2. **Dead-end detection that cannot match pre-existing source.** Patterns must
-   be checked against a diff of what the agent *wrote*, and must not appear in
-   the fixture to begin with.
-3. **Verification that each arm's configuration actually activated**, asserted
-   before trials count.
+1. **One scenario, one model, one day.** External validity is unproven.
+2. **Operator config contaminated every trial** (see the known limitation in
+   `bench/README.md`): `CLAUDE_CONFIG_DIR` isolation breaks keychain auth, so
+   the operator's skills were present in both arms. Each trial records
+   `operator_env`; results do not represent a stock agent.
+3. **A harness bug was fixed mid-run.** The activation assertion read the init
+   event's tool list, which does not enumerate MCP tools, so it was excluding
+   legendary trials in which `used_recall` and `used_remember` were both
+   recorded and memories existed on disk. The fix recomputes activation from
+   observed use, using data captured before the change. Both the bug and the
+   fix are in git history. It moved the result in legendary's favour, so it
+   deserves the scrutiny.
+4. **We wrote legendary.** The methodology was pre-registered and committed
+   before the run; anyone can re-run it.
 
-Until those exist, this project makes **no performance claim**.
+Raw per-trial JSON and full session transcripts for all 20 trials are in
+`bench/results/`.
+
+### History
+
+The v1 benchmark reported the opposite (legendary costing more) and was
+retracted for measuring nothing - its fixture let session 2 read session 1's
+fix, and its headline metric matched strings in the fixture's own source. That
+retraction, and the four defects behind it, are what this design was built to
+make impossible.
