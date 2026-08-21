@@ -1,0 +1,39 @@
+{
+  "scenario": "opaque_service",
+  "arm": "mem0",
+  "trial": 2,
+  "session_1": {
+    "cost_usd": 0.7636189999999998,
+    "num_turns": 13,
+    "output_tokens": 6307,
+    "duration_s": 101.9,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": false,
+    "used_remember": false,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "session_2": {
+    "cost_usd": 1.1837329999999997,
+    "num_turns": 25,
+    "output_tokens": 15382,
+    "duration_s": 237.2,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": false,
+    "used_remember": false,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "s1_correct": true,
+  "s2_correct": true,
+  "s2_quirk_hits": 24,
+  "wrote_memory": null,
+  "hook_fired": null,
+  "activation_failures": []
+}

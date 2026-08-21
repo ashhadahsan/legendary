@@ -78,6 +78,68 @@ first try.
 
 *(table and analysis above)*
 
+## Head-to-head vs mem0 (n=10 per arm, same scenario)
+
+The first comparison against a memory tool people actually use, rather than
+against nothing.
+
+| arm | n | median rediscoveries | range | s2 cost | s2 correct |
+|---|---|---|---|---|---|
+| baseline | 10 | 9.5 | 1-15 | $0.60 | 10/10 |
+| mem0 | 10 | **11.5** | 0-26 | **$0.77** | 10/10 |
+| legendary | 10 | **1.0** | 0-2 | $0.60 | 10/10 |
+
+```
+baseline  [1, 6, 7, 7, 9, 10, 10, 12, 12, 15]   = 89 wasted requests
+mem0      [0, 0, 4, 7, 11, 12, 12, 15, 24, 26]  = 111
+legendary [0, 1, 1, 1, 1, 1, 2, 2, 2, 2]        = 13
+```
+
+- legendary vs mem0: **p = 0.00705**
+- mem0 vs baseline: **p = 0.695** - mem0 was statistically indistinguishable
+  from having no memory at all on this task, while costing 28% more per
+  session.
+
+### Two explanations we tested and rejected
+
+**"mem0 never got used."** False. Counting actual tool invocations (not
+ToolSearch lookups - an early count of ours conflated the two), mem0 stored in
+**10/10** trials and was searched in **9/10**. It was used as intended.
+
+**"mem0 stored worse knowledge."** Also false. Its memories were correct and
+detailed, capturing the full service contract including the quirk. Content was
+not the problem.
+
+### What actually differed: when the memory arrives
+
+Both tools held the right knowledge and both were queried. The difference is
+timing.
+
+legendary's `guard` hook fired in **10/10** trials, triggered by the error
+signatures stored with the episode (`assert 0.0 == 25.0`,
+`test_billing_reconciliation`). The fix was pushed back **at the moment the
+failure recurred** - repeatedly, without being asked. mem0 was searched once,
+early, and the agent then proceeded on its own; nothing re-delivered the
+knowledge when it became relevant again.
+
+That is a claim about *delivery*, not about storage or retrieval quality, and
+it is the specific thesis v0.2 was rebuilt around. mem0 is a mature tool with
+capabilities legendary does not have - semantic search, cross-application
+memory, scale. On this task, none of that substituted for arriving at the right
+moment.
+
+### Fairness
+
+- The mem0 adapter is ours and is published (`bench/mem0_mcp.py`) for audit:
+  two tools mapping onto `Memory.add`/`Memory.search`, no tuning either way.
+- We pinned **current** Gemini models because mem0's built-in defaults point at
+  a retired one. That change helps mem0.
+- mem0 got the same activation assertion as every arm; zero trials excluded.
+- baseline and legendary numbers are the same n=10 runs reported above, on the
+  same fixture and machine. Only the mem0 arm was run fresh.
+- We wrote legendary. Anyone can re-run this: the harness, adapter, fixture,
+  and every transcript are committed.
+
 ## Scenario 3 result: legendary LOSES (n=10)
 
 A second scenario, deliberately different: negative knowledge about our own

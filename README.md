@@ -210,24 +210,35 @@ and busy_timeout cannot help. Working approach: BEGIN IMMEDIATE.
 
 Human-readable, PR-reviewable, and it merges like code.
 
-## Benchmark: it depends, and we measured where
+## Benchmark
 
-Two scenarios, n=10 per arm, hard reset between sessions so memory is the only
-channel. **They disagree, and both are published.**
+Head-to-head on a task where the needed knowledge cannot be recovered from the
+repository, with the working tree hard-reset between sessions so memory is the
+only channel. n=10 per arm.
 
-| when the needed knowledge is... | median rediscoveries | cost |
+| arm | median rediscoveries in session 2 | s2 cost |
 |---|---|---|
-| arbitrary, only discoverable by experiment | **9.5 -> 1.0** (p=0.00015) | same |
-| already in the model's priors | 0 -> 0 (no effect) | **+54% for legendary** |
+| no memory | 9.5 | $0.60 |
+| mem0 | **11.5** | $0.77 |
+| **legendary** | **1.0** | $0.60 |
 
-legendary is not free. On tasks where the model already knows the answer, it is
-pure overhead. It pays off on arbitrary, environment-specific knowledge - the
-kind that has no home in a comment or a README.
+legendary vs mem0: **p = 0.00705**. mem0 vs no memory at all: p = 0.695 -
+indistinguishable on this task.
 
-A third, earlier benchmark reported legendary losing and was **retracted for
-measuring nothing**. Full numbers, both results, the retraction, and a harness
-bug we fixed mid-run in our own favour:
-[benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
+Both tools stored correct knowledge, and both were queried (mem0 stored in
+10/10 trials, was searched in 9/10). The difference was **when** the memory
+arrived: legendary's hook pushed it back at the moment the failure recurred, in
+10/10 trials. mem0 was searched once, early.
+
+**It is not a universal win.** On a second scenario, where the needed knowledge
+was already in the model's priors, legendary had no effect and cost **54%
+more**. It pays off on arbitrary, environment-specific knowledge - the kind
+with no home in a comment or a README - and is pure overhead otherwise.
+
+An earlier benchmark of ours reported legendary losing and was **retracted for
+measuring nothing**. Full numbers, both scenarios, the retraction, two
+explanations we tested and rejected, and a harness bug we fixed mid-run in our
+own favour: [benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
 
 ## How this differs from other tools
 
