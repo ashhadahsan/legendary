@@ -210,26 +210,24 @@ and busy_timeout cannot help. Working approach: BEGIN IMMEDIATE.
 
 Human-readable, PR-reviewable, and it merges like code.
 
-## Benchmark
+## Benchmark: it depends, and we measured where
 
-On a two-session task where the needed knowledge **cannot** be recovered from
-the repository (it lives in an opaque service, and the working tree is
-hard-reset between sessions), n=10 per arm:
+Two scenarios, n=10 per arm, hard reset between sessions so memory is the only
+channel. **They disagree, and both are published.**
 
-| arm | median rediscoveries in session 2 | range |
+| when the needed knowledge is... | median rediscoveries | cost |
 |---|---|---|
-| no memory | **9.5** | 1-15 |
-| legendary | **1.0** | 0-2 |
+| arbitrary, only discoverable by experiment | **9.5 -> 1.0** (p=0.00015) | same |
+| already in the model's priors | 0 -> 0 (no effect) | **+54% for legendary** |
 
-89 wasted requests versus 13. Exact permutation test: **p = 0.00015**.
+legendary is not free. On tasks where the model already knows the answer, it is
+pure overhead. It pays off on arbitrary, environment-specific knowledge - the
+kind that has no home in a comment or a README.
 
-**It did not make anything cheaper** - median session-2 cost was identical
-($0.60 vs $0.60). The agent spent its saved effort inside the same budget. And
-correctness was 10/10 in both arms; the task is solvable either way.
-
-An earlier v1 benchmark reported the opposite and was **retracted for measuring
-nothing**. Full numbers, the retraction, the caveats, and a harness bug fixed
-mid-run in legendary's favour: [benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
+A third, earlier benchmark reported legendary losing and was **retracted for
+measuring nothing**. Full numbers, both results, the retraction, and a harness
+bug we fixed mid-run in our own favour:
+[benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
 
 ## How this differs from other tools
 

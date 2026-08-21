@@ -74,6 +74,57 @@ legendary's worst (2). One legendary trial rediscovered the quirk **zero**
 times: it recalled what the earlier session learned and got the request right
 first try.
 
+## Scenario 2 result: legendary wins (n=10)
+
+*(table and analysis above)*
+
+## Scenario 3 result: legendary LOSES (n=10)
+
+A second scenario, deliberately different: negative knowledge about our own
+code (an approach tried and reverted), measured by authorship in the git diff
+rather than a server log.
+
+| arm | n | median s2 rediscoveries | s2 turns | s2 cost | s2 correct |
+|---|---|---|---|---|---|
+| baseline | 10 | **0.0** | 8 | **$0.32** | 10/10 |
+| legendary | 9 (1 excluded) | **0.0** | 10 | **$0.50** | 9/9 |
+
+**The metric never fired for either arm.** No agent wrote the dead-end pattern
+even once. And legendary cost **56% more per session-2** ($0.50 vs $0.32), and
+54% more across the whole run ($11.40 vs $7.40), for no measurable benefit.
+
+### Why it failed - a design error in the scenario, not a defect in the tool
+
+The agent went straight to `ThreadPoolExecutor(max_workers=...)`. It never
+attempted thread-per-key, so there was nothing to remember and nothing to
+avoid.
+
+The mistake was ours: "use a bounded pool rather than unbounded threads" is
+**standard knowledge the model already has**. We made it absent from the
+repository but not absent from the model's priors. Scenario 2 works because
+"this particular service silently discards JSON floats" is *arbitrary* - it
+cannot be guessed, only observed.
+
+**This adds a fifth bar every scenario must clear:** the knowledge must be
+unavailable to the *model*, not merely absent from the *repo*.
+
+### What the two results say together
+
+This is the more useful finding, and more honest than a clean sweep:
+
+| when the needed knowledge is... | legendary |
+|---|---|
+| arbitrary, discoverable only by experiment (scenario 2) | **9.5x fewer rediscoveries**, p=0.00015 |
+| already in the model's priors (scenario 3) | **~54% more expensive, no benefit** |
+
+legendary is not free. It costs real tokens on every session, and on tasks
+where the model already knows the answer that cost buys nothing. It pays off
+when your codebase has arbitrary, hard-won, environment-specific knowledge -
+which is exactly the knowledge that has no home in a comment or a README.
+
+Use it for the second kind of problem. We would rather say that than sell it
+as a universal win.
+
 ### What this does and does not show
 
 **Does:** on knowledge that provably cannot be recovered from the repository,
