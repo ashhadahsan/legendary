@@ -100,6 +100,26 @@ legendary [0, 1, 1, 1, 1, 1, 2, 2, 2, 2]        = 13
   from having no memory at all on this task, while costing 28% more per
   session.
 
+### Does running both together help? No.
+
+| arm | n | median | raw | total rediscoveries |
+|---|---|---|---|---|
+| mem0 | 10 | 11.5 | | 111 |
+| both | 10 | **1.0** | `[0,0,1,1,1,1,5,5,9,20]` | 43 |
+| legendary | 10 | **1.0** | `[0,1,1,1,1,1,2,2,2,2]` | **13** |
+
+Same median, but no measurable benefit and clearly worse stability: legendary
+alone never exceeded 2 rediscoveries in any trial, while the combination
+produced a 9 and a 20 - worse than baseline's worst trial. Total waste more
+than tripled.
+
+`both` vs `legendary` is **p = 0.36**, so we do *not* claim combining is worse.
+We claim it does not help. Adding legendary to mem0, by contrast, does help
+significantly (p = 0.048).
+
+**Verdict: legendary is standalone.** There is no memory tool to bolt it onto,
+and no benefit measured from doing so.
+
 ### Two explanations we tested and rejected
 
 **"mem0 never got used."** False. Counting actual tool invocations (not
