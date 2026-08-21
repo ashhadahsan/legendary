@@ -94,3 +94,17 @@ def test_search_recovers_from_corrupt_index(repo: Path):
 
     db_path(repo).write_bytes(b"this is definitely not a sqlite database")
     assert [h[0] for h in search(repo, "sqlite deadlock")] == ["mem-1"]
+
+
+def test_triggers_indexed_for_active_memories(repo: Path):
+    from legendary.index import all_triggers
+
+    save(
+        repo,
+        mem("mem-t", "locked episode", "body").model_copy(
+            update={"type": "episode", "triggers": ["database is locked"]}
+        ),
+    )
+    save(repo, mem("mem-d", "dead note", "body", status="deprecated"))
+    rebuild(repo)
+    assert all_triggers(repo) == [("mem-t", "database is locked")]
