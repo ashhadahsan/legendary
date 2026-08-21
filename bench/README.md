@@ -1,87 +1,111 @@
-# legendary benchmark
+# legendary benchmark v2
 
 Pre-registered **before** any run, and committed, so results cannot be
 retro-fitted to a conclusion.
 
+The v1 benchmark and its n=5 result are **retracted** — see
+`docs/benchmark.md`. Its fixture is deleted. This document describes its
+replacement, built specifically to make each of v1's four defects structurally
+impossible.
+
 ## Question
 
-Does code-anchored memory reduce tokens-to-completion and prevent repeated
-failed approaches on multi-session tasks?
+Does pushed, verified memory reduce the cost of a second session on knowledge
+that cannot be recovered from the repository?
 
-## Arms (identical except MCP configuration)
+## Arms
 
-1. `baseline` - no memory, no graph tooling
-2. `graphify` - Graphify MCP only
-3. `legendary` - legendary MCP only
-4. `both` - Graphify + legendary
+| arm | configuration |
+|---|---|
+| `baseline` | no memory tooling |
+| `legendary` | `legendary init` defaults: both hooks + the MCP add-on |
 
-`graphify` is included because it is the closest well-known tool in the space,
-and because the honest hypothesis is that the two are **complementary** rather
-than competing: Graphify models code structure, legendary remembers decisions
-and failures. If `both` wins, that is the result we publish.
+Both run with `--strict-mcp-config`; `baseline` gets an empty server map so it
+cannot inherit ambient MCP servers.
 
 ## Protocol
 
-Each trial is TWO sessions with separate context - the amnesia boundary is the
-thing under test:
+Each trial is two sessions.
 
-- **Session 1:** fix the failing concurrency test for `sync/worker.py`. The
-  counter is incremented with a read-modify-write inside a *deferred*
-  transaction. Under concurrency SQLite returns `SQLITE_BUSY` on the lock
-  upgrade **without invoking the busy handler**, because retrying cannot
-  resolve it. So the two most intuitive fixes - raising `busy_timeout` and
-  wrapping in `BEGIN TRANSACTION` - are genuine dead ends. Only
-  `BEGIN IMMEDIATE` works.
-- **Session 2 (fresh context):** fix the same class of bug in
-  `sync/reporter.py`. Without memory of session 1, agents re-explore the same
-  dead ends.
+- **Session 1:** `test_billing_reconciliation` fails. The payments service
+  silently drops any record whose `amount` is a JSON float — and still answers
+  `200 {"status": "accepted"}`. The fix is to send string decimals. The service
+  is a harness-owned mock (`bench/mockpay.py`) that is **never copied into the
+  trial repo**, so the quirk is discoverable only by experiment.
+- **Hard reset.** `git reset --hard` + `git clean`, preserving only the arm's
+  memory/config artifacts. Session 1's code changes are gone.
+- **Session 2:** implement `billing/refunds.py` against a *different* endpoint
+  with the same quirk. Baseline must rediscover it; a working memory system
+  should not.
 
-Fixture validated four ways before benchmarking:
+The reset is what makes this ungameable: in v1, session 2 could read session 1's
+fix in a sibling file, so the task never required memory at all.
+
+### Fixture validation (run before benchmarking)
 
 | attempt | result |
 |---|---|
 | broken baseline | fails |
-| larger `busy_timeout` (60s) | still fails |
-| `BEGIN TRANSACTION` (deferred) | still fails |
-| `BEGIN IMMEDIATE` | passes |
-
-The previous fixture was discarded: it allowed a legitimate
-`sqlite3.connect(timeout=...)` fix, so no agent was tempted into the trap and
-`repeated_failure` could not discriminate. That run stays in git history.
+| retry / longer timeout | **cannot help** — the server returns `accepted` and no error |
+| string decimals | passes |
+| grep the repo for the quirk | no match — unrecoverable from code |
 
 ## Pre-registered metrics
 
-- `tokens_total` = input + cache_creation + cache_read + output, both sessions
-- `cost_usd`, `duration_s`, `num_turns`
-- `dead_ends` (per session) - which of `DEAD_END_PATTERNS` in run_bench.py
-  appear in that session's assistant transcript: `busy_timeout`,
-  `BUSY_TIMEOUT_MS`, `timeout=`, `time.sleep`, `BEGIN TRANSACTION`,
-  `BEGIN DEFERRED`. This list and the code must stay identical.
-- `repeated_failure` (bool) - true when session 2 explored any dead end.
-  Measured from session 2's **transcript**, not the final diff: an agent that
-  tries `busy_timeout`, watches it fail, and reverts it leaves no diff trace
-  but has still burned the tokens.
-- `found_correct_fix` (bool) - `BEGIN IMMEDIATE` appears in the transcript
-- `correct` (bool) - does `pytest` pass in the scenario repo afterwards?
+Primary, both from session 2 only (summing both sessions buries the effect
+under session 1's write-time overhead):
+
+- `s2_quirk_hits` — number of session-2 requests containing float amounts,
+  counted from the **mock server's own log**. Behavioral, and textually
+  unrelated to anything in the repo, so it cannot match source text the way
+  v1's detector did.
+- `session_2.cost_usd` and `session_2.num_turns`
+- `s2_correct` — does `pytest tests/test_refunds.py` pass afterwards
+
+Secondary: `s1_correct`, `wrote_memory`, `hook_fired`, `used_recall`,
+`used_remember`.
+
+## Arm-activation assertions
+
+A trial whose configuration did not actually activate is **classified and
+excluded**, never silently averaged in. `activation_failures` records:
+
+- `mcp_tools_not_offered` — the init event did not list `mcp__legendary__*`
+- `no_memory_written_in_s1` — the legendary arm wrote nothing to remember
+
+`report.py` prints the excluded count beside every arm.
 
 ## Rules
 
-- N >= 5 trials per arm; report median and full range, never a single run.
-- Identical prompts across arms; prompts are fixed in `run_bench.py` and
-  committed.
-- Every arm runs with `--strict-mcp-config`, including `baseline` (with an
-  empty server map), so no arm inherits ambient MCP servers.
-- ALL runs are published in `bench/results/*.json`, including failures and runs
-  where legendary loses. No run is discarded after the fact.
+- n >= 10 per arm, interleaved by round so an interrupted run keeps arms
+  balanced.
+- Identical prompts across arms, fixed in `run_bench.py` and committed.
+- A grep gate aborts the run if the fixture contains the quirk keyword.
+- ALL runs are published in `bench/results/`, including failures and runs where
+  legendary loses. No run is discarded after the fact.
+- "Delivered but ignored" is decided by ordering: injection/recall timestamp vs
+  the first quirk hit in session 2.
 - Author bias disclosed: we wrote legendary. Anyone can re-run this.
+
+## Known limitation (measured, not assumed)
+
+`CLAUDE_CONFIG_DIR` isolation was probed and **rejected**: it strips the
+operator's skills and plugins but breaks authentication, because credentials
+live in the OS keychain. Trials therefore run with the operator's global config
+present — in v1 this meant a `systematic-debugging` skill was active in every
+trial, which suppresses exactly the thrashing the benchmark measures.
+
+It affects all arms equally, but results do not represent a stock agent. Every
+trial records `operator_env` (slash-command and tool counts) so the
+contamination is visible in the published data rather than hidden.
 
 ## Running it
 
 ```bash
-uv run python bench/run_bench.py --arms baseline -n 1 --workdir /tmp/legbench  # smoke
-uv run python bench/run_bench.py -n 5 --workdir /tmp/legbench                  # full
+uv run python bench/run_bench.py --arms baseline -n 1 --workdir /tmp/legbench-v2  # smoke
+uv run python bench/run_bench.py -n 10 --workdir /tmp/legbench-v2                 # full
 uv run python bench/report.py
 ```
 
-This costs real API credits (4 arms x 5 trials x 2 sessions = 40 agent
-sessions). It is deliberately not run in CI.
+This spends real Claude usage quota (~500k tokens per trial). It is
+deliberately not run in CI, and running it is always an explicit decision.
