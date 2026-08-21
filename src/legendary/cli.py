@@ -1,4 +1,4 @@
-"""legendary CLI: init | search | reindex | doctor | extract | inject | mcp."""
+"""legendary CLI: init | search | reindex | doctor | surface | guard | mcp."""
 
 from __future__ import annotations
 
@@ -10,18 +10,9 @@ from pathlib import Path
 from legendary import index as idx
 from legendary import service
 
-_CONFIG_TOML = """\
-# legendary configuration
-[rank]
-# score = fts*w_fts + overlap*w_overlap + recency*w_recency - stale_penalty*w_stale
-w_fts = 2.0
-w_overlap = 1.5
-w_recency = 0.5
-w_stale = 1.0
-"""
-
 _MCP_SNIPPET = """\
-Add legendary to your MCP client, e.g. Claude Code (.mcp.json):
+Hooks installed in .claude/settings.json (primary channel - memories arrive
+automatically). Optional add-on, agent-initiated search via MCP (.mcp.json):
 
 {
   "mcpServers": {
@@ -32,24 +23,47 @@ Add legendary to your MCP client, e.g. Claude Code (.mcp.json):
   }
 }
 
-Claude Code hooks (.claude/settings.json) for auto-capture:
-
-{
-  "hooks": {
-    "PreToolUse": [{"matcher": "Read|Edit|Write",
-      "hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary surface --repo %s"}]}],
-    "SessionStart": [{"hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary inject --repo %s"}]}],
-    "SessionEnd": [{"hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary extract --repo %s"}]}]
-  }
-}
-
-Suggested CLAUDE.md snippet:
-  Before editing a file, call the legendary `recall` tool with the file path
-  in files_in_focus. After decisions or failed attempts, call `remember`.
+Suggested CLAUDE.md line:
+  When an approach fails, call the legendary `remember` tool with type=episode
+  and the verbatim error string as a trigger.
 """
+
+
+def _install_hooks(repo: Path) -> None:
+    """Merge legendary's hooks into .claude/settings.json, idempotently.
+
+    Never clobbers user configuration: unknown keys and existing hook entries
+    are preserved; our entries are recognized by their command substring."""
+    settings_path = repo / ".claude" / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+    hooks = settings.setdefault("hooks", {})
+    wanted = {
+        "PreToolUse": (
+            "Read|Edit|Write",
+            f"uvx --from legendary-mcp legendary surface --repo {repo}",
+        ),
+        "PostToolUse": (
+            "Bash",
+            f"uvx --from legendary-mcp legendary guard --repo {repo}",
+        ),
+    }
+    for event, (matcher, command) in wanted.items():
+        entries = hooks.setdefault(event, [])
+        marker = command.split(" --repo ")[0]
+        if not any(
+            marker in h.get("command", "") for e in entries for h in e.get("hooks", [])
+        ):
+            entries.append(
+                {
+                    "matcher": matcher,
+                    "hooks": [{"type": "command", "command": command}],
+                }
+            )
+    settings_path.parent.mkdir(exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 
 
 def _cmd_init(repo: Path) -> int:
@@ -60,9 +74,6 @@ def _cmd_init(repo: Path) -> int:
         )
         return 1
     (repo / ".legendary" / "memories").mkdir(parents=True, exist_ok=True)
-    config = repo / ".legendary" / "config.toml"
-    if not config.exists():
-        config.write_text(_CONFIG_TOML)
     gitignore = repo / ".gitignore"
     existing = gitignore.read_text() if gitignore.exists() else ""
     additions = [
@@ -77,9 +88,10 @@ def _cmd_init(repo: Path) -> int:
             + "\n".join(additions)
             + "\n"
         )
+    _install_hooks(repo)
     idx.rebuild(repo)
     print(f"initialized .legendary/ in {repo}\n")
-    print(_MCP_SNIPPET % (repo, repo, repo, repo))
+    print(_MCP_SNIPPET % repo)
     return 0
 
 
@@ -108,45 +120,20 @@ def _cmd_doctor(repo: Path) -> int:
     return 0
 
 
-def _cmd_extract(repo: Path, transcript: str | None) -> int:
-    from legendary.extract import extract_from_transcript
+def _render_memory(m: object, verdict: str) -> str:
+    """Imperative guardrail rendering shared by surface and guard.
 
-    path = transcript
-    if path is None:
-        # Claude Code hooks pass JSON on stdin including transcript_path
-        try:
-            hook_input = json.load(sys.stdin)
-            path = hook_input.get("transcript_path")
-        except Exception:
-            path = None
-    if not path:
-        print("error: no transcript (pass a path or pipe hook JSON)", file=sys.stderr)
-        return 1
-    try:
-        saved = extract_from_transcript(repo, Path(path))
-    except RuntimeError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
-    print(f"extracted {len(saved)} memories: {', '.join(saved) if saved else '-'}")
-    return 0
-
-
-def _cmd_inject(repo: Path, k: int) -> int:
-    """Print top memories for session-start context injection."""
-    items = service.list_memories(repo)
-    if not items:
-        return 0
-    items.sort(key=lambda m: m["created"], reverse=True)
-    conventions = [m for m in items if m["type"] == "convention"][:k]
-    recent = [m for m in items if m["type"] != "convention"][:k]
-    from legendary.store import load
-
-    print("# Legendary memories for this repo (use `recall` tool for more)\n")
-    for m in conventions + recent:
-        full = load(repo, m["id"])
-        if full:
-            print(f"- [{full.type}] {full.title}: {full.body[:200]}")
-    return 0
+    Fresh carries the affordance that licenses acting without re-derivation;
+    stale carries the instruction to verify. Both are the product's voice."""
+    title = getattr(m, "title")
+    body = getattr(m, "body")[:300]
+    mtype = getattr(m, "type")
+    if verdict == "fresh":
+        return f"- [{mtype}] {title} (verified against current code): {body}"
+    return (
+        f"- [{mtype}] {title} [{verdict} - code changed since this was "
+        f"written; verify before trusting]: {body}"
+    )
 
 
 def _cmd_surface(repo: Path) -> int:
@@ -184,10 +171,7 @@ def _cmd_surface(repo: Path) -> int:
         if m is None or m.status != "active":
             continue
         verdict = worst_verdict(check_memory(repo, m.anchors))
-        flag = (
-            "" if verdict == "fresh" else f" [{verdict} - verify against current code]"
-        )
-        lines.append(f"- [{m.type}] {m.title}{flag}: {m.body[:300]}")
+        lines.append(_render_memory(m, verdict))
         rendered.append(mid)
     if not lines:
         return 0
@@ -210,10 +194,69 @@ def _cmd_surface(repo: Path) -> int:
     return 0
 
 
-def _cmd_mcp(repo: Path, transport: str, host: str, port: int) -> int:
+def _cmd_guard(repo: Path) -> int:
+    """PostToolUse hook on Bash: inject episodes whose triggers match output.
+
+    A recurring error string is the highest-fidelity experience-following
+    signal an agent emits - no query formulation needed. Any internal failure
+    exits 0: a broken hook must never break the agent.
+    """
+    try:
+        hook = json.load(sys.stdin)
+    except Exception:
+        return 0
+    if hook.get("tool_name") != "Bash":
+        return 0
+    haystack = json.dumps(hook.get("tool_response") or {}).lower()
+    if not haystack or haystack == "{}":
+        return 0
+    from legendary.index import all_triggers
+
+    matched_ids = {mid for mid, trig in all_triggers(repo) if trig.lower() in haystack}
+    if not matched_ids:
+        return 0
+    session = hook.get("session_id") or "default"
+    cache = repo / ".legendary" / f".surfaced-{session}"
+    seen = set(cache.read_text().split()) if cache.exists() else set()
+    new_ids = sorted(matched_ids - seen)
+    if not new_ids:
+        return 0
+    from legendary.stale import check_memory, worst_verdict
+    from legendary.store import load
+
+    lines = []
+    rendered: list[str] = []
+    for mid in new_ids[:3]:
+        m = load(repo, mid)
+        if m is None or m.status != "active":
+            continue
+        verdict = worst_verdict(check_memory(repo, m.anchors))
+        lines.append(_render_memory(m, verdict))
+        rendered.append(mid)
+    if not lines:
+        return 0
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(" ".join(sorted(seen | set(rendered))))
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": (
+                        "This failure has been seen before. Recorded episodes:\n"
+                        + "\n".join(lines)
+                    ),
+                }
+            }
+        )
+    )
+    return 0
+
+
+def _cmd_mcp(repo: Path) -> int:
     from legendary.mcp_server import run
 
-    run(repo, transport=transport, host=host, port=port)
+    run(repo)
     return 0
 
 
@@ -241,20 +284,9 @@ def main(argv: list[str] | None = None) -> int:
     p_search.add_argument("-k", type=int, default=5)
     _add_repo(sub.add_parser("reindex"))
     _add_repo(sub.add_parser("doctor"))
-    p_extract = _add_repo(sub.add_parser("extract"))
-    p_extract.add_argument("transcript", nargs="?", default=None)
-    p_inject = _add_repo(sub.add_parser("inject"))
-    p_inject.add_argument("-k", type=int, default=5)
     _add_repo(sub.add_parser("surface"))
-    p_mcp = _add_repo(sub.add_parser("mcp"))
-    p_mcp.add_argument(
-        "--transport",
-        choices=["stdio", "http"],
-        default="stdio",
-        help="stdio (default) or stateless streamable HTTP",
-    )
-    p_mcp.add_argument("--host", default="127.0.0.1")
-    p_mcp.add_argument("--port", type=int, default=8787)
+    _add_repo(sub.add_parser("guard"))
+    _add_repo(sub.add_parser("mcp"))
 
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
@@ -267,14 +299,12 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_reindex(repo)
         case "doctor":
             return _cmd_doctor(repo)
-        case "extract":
-            return _cmd_extract(repo, args.transcript)
-        case "inject":
-            return _cmd_inject(repo, args.k)
         case "surface":
             return _cmd_surface(repo)
+        case "guard":
+            return _cmd_guard(repo)
         case "mcp":
-            return _cmd_mcp(repo, args.transport, args.host, args.port)
+            return _cmd_mcp(repo)
     return 2
 
 

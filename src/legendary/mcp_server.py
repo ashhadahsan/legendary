@@ -49,12 +49,15 @@ def build_server(repo_root: Path) -> MCPServer:
         anchors: Optional[list[dict]] = None,
         tags: Optional[list[str]] = None,
         supersedes: Optional[str] = None,
+        triggers: Optional[list[str]] = None,
     ) -> str:
-        """Save a memory. type: decision|episode|convention|reference.
+        """Save a memory. type: decision|episode.
         Each anchor: {file, symbol?, lines?: [start, end]}. Anchors are
         resolved and content-hashed now so staleness can be detected later.
         Pass supersedes=<memory_id> when this memory corrects an existing one:
-        the old memory is deprecated and back-linked instead of being lost."""
+        the old memory is deprecated and back-linked instead of being lost.
+        type=episode REQUIRES triggers: the verbatim error strings or failing
+        test names you observed, so the memory resurfaces on the same failure."""
         return json.dumps(
             service.remember(
                 repo_root,
@@ -64,6 +67,7 @@ def build_server(repo_root: Path) -> MCPServer:
                 anchors=anchors,
                 tags=tags,
                 supersedes=supersedes,
+                triggers=triggers,
             )
         )
 
@@ -79,50 +83,13 @@ def build_server(repo_root: Path) -> MCPServer:
         return json.dumps(_slim(service.recall(repo_root, query, files_in_focus, k)))
 
     @mcp.tool()
-    def list_memories(
-        type: Optional[str] = None,
-        tag: Optional[str] = None,
-        file: Optional[str] = None,
-    ) -> str:
-        """Browse memories, optionally filtered by type, tag, or anchored file."""
-        return json.dumps(
-            service.list_memories(repo_root, type=type, tag=tag, file=file)
-        )
-
-    @mcp.tool()
     def deprecate(memory_id: str, reason: str) -> str:
         """Soft-delete a memory that is wrong or superseded. Records the reason."""
         return json.dumps(service.deprecate(repo_root, memory_id, reason))
 
-    @mcp.tool()
-    def stale_report() -> str:
-        """List all memories whose anchored code has changed or disappeared."""
-        return json.dumps(service.stale_report(repo_root))
-
     return mcp
 
 
-def run(
-    repo_root: Path,
-    transport: str = "stdio",
-    host: str = "127.0.0.1",
-    port: int = 8787,
-) -> None:
-    """Serve over stdio (default) or stateless streamable HTTP.
-
-    Stateless HTTP holds no per-session server state, so any number of workers
-    can serve any request - the right shape for containers and shared team
-    deployments. legendary itself is already stateless: the repo on disk is the
-    only state.
-    """
-    server = build_server(repo_root)
-    if transport == "stdio":
-        server.run()
-        return
-    import anyio
-
-    anyio.run(
-        lambda: server.run_streamable_http_async(
-            host=host, port=port, stateless_http=True, json_response=True
-        )
-    )
+def run(repo_root: Path) -> None:
+    """Serve the MCP tools over stdio."""
+    build_server(repo_root).run()

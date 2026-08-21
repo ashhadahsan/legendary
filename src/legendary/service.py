@@ -27,6 +27,7 @@ def remember(
     source: str = "agent",
     supersedes: Optional[str] = None,
     transcript: Optional[str] = None,
+    triggers: Optional[list[str]] = None,
 ) -> dict[str, Any]:
     """Validate, anchor-resolve, save, and index a new memory."""
     created = datetime.now(timezone.utc)
@@ -35,6 +36,13 @@ def remember(
         old = store.load(repo_root, supersedes)
         if old is None:
             raise ValueError(f"no such memory to supersede: {supersedes}")
+    if type == "episode" and not triggers:
+        raise ValueError(
+            "episode memories must include triggers: the verbatim error string "
+            "or failing test name you observed (e.g. 'sqlite3.OperationalError: "
+            "database is locked'). Triggers are what let this memory resurface "
+            "when the same failure happens again."
+        )
     resolved: list[Anchor] = []
     for raw in anchors or []:
         if not isinstance(raw, dict):
@@ -57,6 +65,14 @@ def remember(
                 f"anchor file not found: {anchor.file} - "
                 "check the path or retry with a line range"
             ) from exc
+    if old is not None:
+        missing = {a.file for a in old.anchors} - {a.file for a in resolved}
+        if missing:
+            raise ValueError(
+                f"supersede blocked: the new memory does not cover anchors "
+                f"{sorted(missing)} of {old.id}. Anchor the replacement to those "
+                "files too, or use deprecate(reason=...) instead of supersedes."
+            )
     try:
         memory = Memory(
             id=Memory.new_id(title, created),
@@ -68,6 +84,7 @@ def remember(
             anchors=resolved,
             tags=tags or [],
             transcript=transcript,
+            triggers=triggers or [],
         )
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc

@@ -57,9 +57,8 @@ src/legendary/
   index.py        derived SQLite FTS5 index (disposable, auto-rebuilding)
   rank.py         weighted recall scoring
   service.py      shared application layer
-  mcp_server.py   MCP tools (mcp 2.x SDK)
-  cli.py          command line interface
-  extract.py      transcript -> memories via headless claude
+  mcp_server.py   MCP tools (mcp 2.x SDK) - the optional add-on
+  cli.py          CLI + both hooks (surface, guard) - the primary channel
 ```
 
 ## Ground rules
@@ -68,5 +67,7 @@ src/legendary/
   then implement.
 - **The markdown store is canonical.** Any change must keep the markdown
   round-trip lossless; `index.db` must remain fully rebuildable from it.
-- **Retrieval stays LLM-free.** Only `extract` may call a model.
+- **Nothing calls an LLM.** v0.2 removed the last feature that did.
+- **Hooks must never break the agent.** `surface` and `guard` exit 0 on any
+  internal error, always.
 - No AI-attribution trailers in commit messages.

@@ -1,51 +1,48 @@
 # MCP tools
 
-The server exposes five tools. Descriptions below are what the agent sees, so
-they are written as instructions to the agent.
+Three tools. The hooks are the primary channel; these exist for deliberate,
+agent-initiated search.
 
 ## `remember`
 
-Save a memory anchored to code.
-
 | Parameter | Type | Notes |
 |---|---|---|
-| `type` | str | `decision` / `episode` / `convention` / `reference` |
+| `type` | str | `decision` or `episode` |
 | `title` | str | short, searchable |
-| `body` | str | the actual knowledge |
+| `body` | str | write it as an instruction, not a description |
 | `anchors` | list | `[{file, symbol?, lines?: [start, end]}]` |
 | `tags` | list | optional |
-| `supersedes` | str | id of a memory this one corrects |
+| `triggers` | list | **required for episodes** — verbatim error strings |
+| `supersedes` | str | id of a memory this corrects (must cover its anchors) |
 
-`supersedes` deprecates the old memory and back-links it via `superseded_by`,
-so corrections never destroy history.
+```json
+{
+  "type": "episode",
+  "title": "deferred BEGIN deadlocks under concurrency",
+  "body": "Use BEGIN IMMEDIATE. busy_timeout cannot fix a write-write conflict - SQLite raises SQLITE_BUSY on lock upgrade without calling the busy handler.",
+  "anchors": [{"file": "sync/worker.py", "symbol": "bump_counter"}],
+  "triggers": ["sqlite3.OperationalError: database is locked"]
+}
+```
+
+Write bodies as guardrails: *"Use X, not Y, because Z"* — with the causal
+clause, so a future reader can judge whether the reason still applies instead
+of cargo-culting the fix.
 
 ## `recall`
 
-Search memories. Pass the files you are editing as `files_in_focus` to boost
-memories anchored to them. Every result carries a `staleness` flag.
-
-```json
-{"query": "wal deadlock", "files_in_focus": ["src/sync/worker.py"], "k": 5}
-```
-
-## `list_memories`
-
-Browse without searching; filter by `type`, `tag`, or `file`.
+Search. Pass the files you are editing as `files_in_focus` (absolute or
+relative — both work) to boost memories anchored to them. Every result carries
+a `staleness` flag.
 
 ## `deprecate`
 
-Soft-delete a memory that is wrong, recording a `reason`. Deprecated memories
-leave the search index but stay in git history.
+Soft-delete a memory that is wrong, recording a reason. It leaves the search
+index but stays in git history.
 
-## `stale_report`
-
-Every active memory whose anchored code has changed or disappeared. Good for a
-periodic cleanup pass.
-
-## Suggested CLAUDE.md snippet
+## Suggested CLAUDE.md line
 
 ```markdown
-Before editing a file, call the legendary `recall` tool with that file in
-files_in_focus. When you make a decision, discover a convention, or an approach
-fails, call `remember` and anchor it to the relevant file/symbol.
+When an approach fails, call the legendary `remember` tool with type=episode
+and the verbatim error string as a trigger.
 ```

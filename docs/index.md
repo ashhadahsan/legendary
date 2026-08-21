@@ -1,39 +1,46 @@
 # legendary
 
-**Code-anchored, staleness-aware, git-native memory for coding agents.**
+**A delivery-and-verification layer for coding-agent memory.**
 
-Coding agents are stateless. Every session re-reads your repo, re-derives
-decisions you already made, and retries fixes that already failed. Memory
-frameworks remember conversations but are code-blind: a memory never knows it
-was about `src/sync/worker.py:120`, and never notices when that code changes.
+Most knowledge already has a home: decisions belong in comments and ADRs,
+conventions in CLAUDE.md, references in docs. Two things have no home anywhere:
 
-legendary merges the two sides.
+1. **Negative knowledge** — the approach you tried that failed, and why.
+   Nobody writes a comment on code that does not exist.
+2. **Verification** — CLAUDE.md and conversational memory rot silently. There
+   is no mechanism that checks whether a written claim is still true.
 
-## The one thing nothing else does
+legendary does exactly those two things, and pushes the result back at the
+moment it matters.
+
+## The mechanism
 
 ```console
-$ legendary search "strip None"
-strip() breaks on None   [fresh]
-
-$ vim app.py     # edit the anchored function
-
-$ legendary search "strip None"
-strip() breaks on None   [stale - parse changed since 8fa2c31]
+$ # agent runs tests, sees: AttributeError: 'NoneType' has no attribute 'strip'
+This failure has been seen before. Recorded episodes:
+- [episode] strip() crashes on None (verified against current code):
+  Use a guard: data.strip() if data else "". Retries do not help.
 ```
 
-Every other memory system would still hand you that memory with full
-confidence. Stale memory is worse than no memory: the agent acts on a claim
-that stopped being true weeks ago.
+No `recall` call. No query. The agent hit a failure whose signature was
+recorded, and the episode came back on its own.
+
+Change the anchored code and the same memory arrives differently:
+
+```console
+- [episode] strip() crashes on None [stale - code changed since this was
+  written; verify before trusting]: ...
+```
+
+That downgrade is what makes reusable procedure safe. A stale procedure applied
+confidently is worse than no memory at all.
 
 ## Properties
 
-- **Anchored** - each memory links to a file / symbol / line range at a commit
-- **Staleness-aware** - anchored code changes, the memory says so
-- **Typed** - `decision`, `episode` (tried X, failed because Y), `convention`,
-  `reference`
-- **Git-native** - markdown in `.legendary/memories/`, committed with your
-  code, reviewed in PRs, shared by the whole team
-- **Local-first** - no cloud, no accounts, no API keys, no embeddings
+- **Pushed, not fetched** — two hooks, installed by `init`
+- **Verified** — anchored to file/symbol/commit and content-hashed
+- **Local-first** — no cloud, no API keys, no embeddings; SQLite FTS5
+- **Git-native** — markdown in your repo, reviewed in PRs, shared by your team
 
-Start with the [Quickstart](quickstart.md), or browse the
-[source on GitHub](https://github.com/ashhadahsan/legendary).
+Start with the [Quickstart](quickstart.md), or read
+[how memories reach the agent](concepts.md).

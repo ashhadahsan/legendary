@@ -9,7 +9,7 @@ from legendary.models import Memory
 from legendary.store import legendary_dir, load_all, memories_dir
 
 # Bump when _SCHEMA changes: a stale index is dropped and rebuilt from markdown.
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 _SCHEMA = """
 -- porter stemming: an agent searching "deadlock" must find a memory that says
@@ -25,6 +25,9 @@ CREATE TABLE IF NOT EXISTS mem_meta (
 );
 CREATE TABLE IF NOT EXISTS mem_anchors (
     memory_id TEXT, file TEXT
+);
+CREATE TABLE IF NOT EXISTS mem_triggers (
+    memory_id TEXT, trigger TEXT
 );
 """
 
@@ -67,6 +70,7 @@ def _migrate(conn: sqlite3.Connection) -> sqlite3.Connection:
         conn.execute("DROP TABLE IF EXISTS mem_fts")
         conn.execute("DROP TABLE IF EXISTS mem_meta")
         conn.execute("DROP TABLE IF EXISTS mem_anchors")
+        conn.execute("DROP TABLE IF EXISTS mem_triggers")
         conn.executescript(_SCHEMA)
         conn.execute("DELETE FROM schema_meta")
         conn.execute("INSERT INTO schema_meta VALUES (?)", (_SCHEMA_VERSION,))
@@ -93,6 +97,7 @@ def _delete_rows(conn: sqlite3.Connection, memory_id: str) -> None:
     conn.execute("DELETE FROM mem_fts WHERE id = ?", (memory_id,))
     conn.execute("DELETE FROM mem_meta WHERE id = ?", (memory_id,))
     conn.execute("DELETE FROM mem_anchors WHERE memory_id = ?", (memory_id,))
+    conn.execute("DELETE FROM mem_triggers WHERE memory_id = ?", (memory_id,))
 
 
 def _insert_rows(conn: sqlite3.Connection, m: Memory) -> None:
@@ -106,6 +111,8 @@ def _insert_rows(conn: sqlite3.Connection, m: Memory) -> None:
     )
     for a in m.anchors:
         conn.execute("INSERT INTO mem_anchors VALUES (?,?)", (m.id, a.file))
+    for trig in m.triggers:
+        conn.execute("INSERT INTO mem_triggers VALUES (?,?)", (m.id, trig))
 
 
 def upsert(repo_root: Path, memory: Memory) -> None:
@@ -144,6 +151,7 @@ def rebuild(repo_root: Path) -> int:
         conn.execute("DELETE FROM mem_fts")
         conn.execute("DELETE FROM mem_meta")
         conn.execute("DELETE FROM mem_anchors")
+        conn.execute("DELETE FROM mem_triggers")
         memories = load_all(repo_root)
         for m in memories:
             _insert_rows(conn, m)
@@ -209,5 +217,22 @@ def memories_for_file(repo_root: Path, file: str) -> list[str]:
             (file,),
         ).fetchall()
         return [r[0] for r in rows]
+    finally:
+        conn.close()
+
+
+def all_triggers(repo_root: Path) -> list[tuple[str, str]]:
+    """(memory_id, trigger) pairs for active memories, for guard matching."""
+    conn = _ensure_populated(repo_root, _connect(repo_root))
+    try:
+        rows = conn.execute(
+            """
+            SELECT t.memory_id, t.trigger FROM mem_triggers t
+            JOIN mem_meta m ON m.id = t.memory_id
+            WHERE m.status = 'active'
+            ORDER BY t.memory_id, t.trigger
+            """
+        ).fetchall()
+        return [(r[0], r[1]) for r in rows]
     finally:
         conn.close()

@@ -26,9 +26,7 @@ def test_naive_created_does_not_break_recall(repo: Path):
     assert m.created.tzinfo is not None  # coerced to UTC at validation
     save(repo, m)
     rebuild(repo)
-    results = recall(
-        repo, "hand edited", now=datetime(2026, 8, 14, tzinfo=timezone.utc)
-    )
+    results = recall(repo, "hand edited")
     assert results[0]["id"] == "mem-naive"
 
 
@@ -54,7 +52,7 @@ def test_non_dict_anchor_raises_value_error_not_type_error(repo: Path):
     with pytest.raises(ValueError, match="must be an object"):
         service.remember(
             repo_root=repo,
-            type="episode",
+            type="decision",
             title="x",
             body="y",
             anchors=["src/sync/worker.py"],  # type: ignore[list-item]
@@ -102,13 +100,6 @@ def test_unresolvable_symbol_still_rejected_in_supported_language(repo: Path):
         resolve_and_hash(repo, Anchor(file="src/sync/worker.py", symbol="NoSuchThing"))
 
 
-def test_missing_transcript_reports_the_real_problem(repo: Path):
-    from legendary.extract import extract_from_transcript
-
-    with pytest.raises(RuntimeError, match="transcript not found"):
-        extract_from_transcript(repo, repo / "does_not_exist.jsonl")
-
-
 @pytest.mark.parametrize("bad_id", ["../../etc/passwd", "..", "a/b", "x\\y", ""])
 def test_memory_id_traversal_rejected(repo: Path, bad_id: str):
     with pytest.raises(ValueError, match="invalid memory id"):
@@ -126,7 +117,7 @@ def test_recall_k_above_default_limit_is_honoured(repo: Path):
             repo,
             Memory(
                 id=f"mem-{n:03d}",
-                type="reference",
+                type="decision",
                 title=f"widget note {n}",
                 body="the same widget body text",
                 created=datetime(2026, 8, 1, tzinfo=timezone.utc),
@@ -141,7 +132,7 @@ def test_recall_k_above_default_limit_is_honoured(repo: Path):
 def test_unicode_round_trips_through_the_store(repo: Path):
     m = Memory(
         id="mem-uni",
-        type="convention",
+        type="decision",
         title="naïve café — déjà vu ✓",
         body="日本語のメモ, emoji 🎯, and «guillemets»",
         created=datetime(2026, 8, 1, tzinfo=timezone.utc),
@@ -195,13 +186,13 @@ def test_upsert_populates_index_on_fresh_clone(repo: Path):
     for n in range(4):
         service.remember(
             repo_root=repo,
-            type="reference",
+            type="decision",
             title=f"clone note {n}",
             body="cloned body",
         )
     db_path(repo).unlink()  # simulate the gitignored index being absent
     service.remember(
-        repo_root=repo, type="reference", title="clone note new", body="cloned body"
+        repo_root=repo, type="decision", title="clone note new", body="cloned body"
     )
     assert len(search(repo, "cloned body", limit=100)) == 5
 
@@ -237,6 +228,7 @@ def test_stemming_matches_word_forms(repo: Path):
         type="episode",
         title="WAL deadlocked on retry",
         body="Wrapping retries in a transaction deadlocked under concurrency.",
+        triggers=["database is locked"],
     )
     for query in ("deadlock", "deadlocks", "deadlocked", "transactions", "wrap"):
         assert service.recall(repo, query), f"{query!r} should match"
@@ -282,6 +274,7 @@ def test_mcp_recall_omits_internal_fields(repo: Path):
         type="episode",
         title="delta finding",
         body="delta body",
+        triggers=["delta error"],
         anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
     )
     server = build_server(repo)
@@ -308,6 +301,7 @@ def test_mcp_recall_reports_commit_when_stale(repo: Path):
         type="episode",
         title="epsilon finding",
         body="epsilon body",
+        triggers=["epsilon error"],
         anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
     )
     p = repo / "src/sync/worker.py"
