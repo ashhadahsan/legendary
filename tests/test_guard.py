@@ -58,3 +58,38 @@ def test_guard_dedupes_within_session(repo: Path, monkeypatch, capsys):
 def test_guard_garbage_stdin_exits_zero(repo: Path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
     assert cli.main(["guard", "--repo", str(repo)]) == 0
+
+
+def test_guard_and_surface_use_separate_caches(repo: Path, monkeypatch, capsys):
+    """Sharing one cache made the two channels indistinguishable in analysis -
+    a benchmark claim had to be withdrawn because of it."""
+    seed_episode(repo)
+    guard(
+        repo, monkeypatch, capsys, "sqlite3.OperationalError: database is locked", "s9"
+    )
+    guarded = list((repo / ".legendary").glob(".guarded-*"))
+    surfaced = list((repo / ".legendary").glob(".surfaced-*"))
+    assert guarded, "guard must write its own cache"
+    assert not surfaced, "guard must not write surface's cache"
+
+
+def test_guard_does_not_suppress_surface_for_same_memory(
+    repo: Path, monkeypatch, capsys
+):
+    """Separate caches also mean a memory pushed by one channel can still be
+    delivered by the other - they answer different questions."""
+    import io as _io
+    import json as _json
+
+    seed_episode(repo)
+    guard(
+        repo, monkeypatch, capsys, "sqlite3.OperationalError: database is locked", "s10"
+    )
+    payload = {
+        "session_id": "s10",
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / "src/sync/worker.py")},
+    }
+    monkeypatch.setattr("sys.stdin", _io.StringIO(_json.dumps(payload)))
+    cli.main(["surface", "--repo", str(repo)])
+    assert capsys.readouterr().out.strip() != ""

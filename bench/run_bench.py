@@ -84,6 +84,9 @@ ARMS = {
     # are they complementary? mem0 has semantic breadth but only answers when
     # asked; legendary pushes but matches on anchors and literal signatures.
     "both": ["legendary", "hook", "mem0"],
+    # --- ablation: which channel actually earns its cost? ---
+    "legendary_recall_only": ["legendary"],  # MCP tools, no hooks
+    "legendary_hooks_only": ["hook_only"],  # hooks installed, MCP absent
 }
 
 GIT_ID = ["-c", "user.email=b@b.b", "-c", "user.name=bench"]
@@ -177,6 +180,11 @@ def run_session(repo: Path, prompt: str, config_path: Path, mock_url: str) -> di
             }
         elif event.get("type") == "assistant":
             transcript.append(json.dumps(event.get("message", {})))
+        elif event.get("type") in ("user", "system"):
+            # hook-injected context arrives here, never in assistant messages.
+            # Saving only assistant turns is what blinded the first analysis of
+            # which channel delivered value.
+            transcript.append(json.dumps(event)[:20000])
     if data is None:
         return {
             "error": (proc.stdout[-2000:] or proc.stderr[-2000:]),
@@ -266,6 +274,22 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
     tools = ARMS[arm]
     config_path = repo / ".bench-mcp.json"
     config_path.write_text(json.dumps(mcp_config(tools, repo)))
+    if "hook_only" in tools:
+        # hooks installed by `legendary init`; MCP simply not configured, so the
+        # agent gets push delivery and no way to search deliberately
+        subprocess.run(
+            [
+                "uvx",
+                "--from",
+                "legendary-mcp",
+                "legendary",
+                "init",
+                "--repo",
+                str(repo),
+            ],
+            check=True,
+            capture_output=True,
+        )
     if "legendary" in tools:
         # v0.2 init installs both hooks itself - that IS the product's default
         subprocess.run(
@@ -299,7 +323,7 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
 
         wrote_memory = (
             bool(list((repo / ".legendary" / "memories").glob("*.md")))
-            if "legendary" in tools
+            if ("legendary" in tools or "hook_only" in tools)
             else None
         )
 
@@ -311,11 +335,12 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
         else:
             s2_quirk_hits = dead_end_diff_hits(repo, cfg["dead_end_diff"])
         s2_correct = tests_pass(repo, mock_url, cfg["s2_tests"])
-        hook_fired = (
-            bool(list((repo / ".legendary").glob(".surfaced-*")))
-            if "hook" in tools
-            else None
-        )
+        if "hook" in tools or "hook_only" in tools:
+            surface_fired = bool(list((repo / ".legendary").glob(".surfaced-*")))
+            guard_fired = bool(list((repo / ".legendary").glob(".guarded-*")))
+            hook_fired = surface_fired or guard_fired
+        else:
+            surface_fired = guard_fired = hook_fired = None
     finally:
         if server is not None:
             server.terminate()
@@ -347,6 +372,8 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
             activation_failures.append("no_legendary_channel_activated")
         if wrote_memory is False:
             activation_failures.append("no_memory_written_in_s1")
+    if "hook_only" in tools and not (surface_fired or guard_fired):
+        activation_failures.append("no_hook_fired")
 
     return {
         "scenario": scenario,
@@ -359,6 +386,8 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
         "s2_quirk_hits": s2_quirk_hits,
         "wrote_memory": wrote_memory,
         "hook_fired": hook_fired,
+        "surface_fired": surface_fired,
+        "guard_fired": guard_fired,
         "activation_failures": activation_failures,
     }
 

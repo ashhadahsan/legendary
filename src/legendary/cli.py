@@ -78,7 +78,11 @@ def _cmd_init(repo: Path) -> int:
     existing = gitignore.read_text() if gitignore.exists() else ""
     additions = [
         e
-        for e in (".legendary/index.db", ".legendary/.surfaced-*")
+        for e in (
+            ".legendary/index.db",
+            ".legendary/.surfaced-*",
+            ".legendary/.guarded-*",
+        )
         if e not in existing
     ]
     if additions:
@@ -216,7 +220,9 @@ def _cmd_guard(repo: Path) -> int:
     if not matched_ids:
         return 0
     session = hook.get("session_id") or "default"
-    cache = repo / ".legendary" / f".surfaced-{session}"
+    # separate cache from `surface`: sharing one file made the two channels
+    # indistinguishable when analysing which one delivered value
+    cache = repo / ".legendary" / f".guarded-{session}"
     seen = set(cache.read_text().split()) if cache.exists() else set()
     new_ids = sorted(matched_ids - seen)
     if not new_ids:
