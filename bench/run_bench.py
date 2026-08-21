@@ -77,6 +77,10 @@ ARMS = {
     "baseline": [],
     # the product's default install: hooks primary, MCP add-on
     "legendary": ["legendary", "hook"],
+    # head-to-head against a known memory tool. Requires OPENAI_API_KEY:
+    # mem0 needs an LLM for fact extraction and an embedder for retrieval.
+    # The adapter is bench/mem0_mcp.py, published for audit.
+    "mem0": ["mem0"],
 }
 
 GIT_ID = ["-c", "user.email=b@b.b", "-c", "user.name=bench"]
@@ -95,6 +99,22 @@ def git(repo: Path, *args: str) -> None:
 
 def mcp_config(tools: list[str], repo: Path) -> dict:
     servers: dict[str, dict] = {}
+    if "mem0" in tools:
+        servers["mem0"] = {
+            "command": "uv",
+            "args": [
+                "run",
+                "--isolated",
+                "--with",
+                "mem0ai",
+                "--with",
+                "mcp>=2.0",
+                "python",
+                str(BENCH / "mem0_mcp.py"),
+                "--repo",
+                str(repo),
+            ],
+        }
     if "legendary" in tools:
         servers["legendary"] = {
             "command": "uvx",
@@ -298,6 +318,14 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
     # ---- arm-activation assertions: a trial that did not run its declared
     # configuration is classified, not silently averaged in ----
     activation_failures = []
+    if "mem0" in tools:
+        used = any(
+            m in (s.get("transcript") or "")
+            for s in (s1, s2)
+            for m in ("mcp__mem0__add_memory", "mcp__mem0__search_memory")
+        )
+        if not used:
+            activation_failures.append("no_mem0_channel_activated")
     if "legendary" in tools:
         # Assert from OBSERVED USE, not from the init event's tool list: that
         # list does not enumerate MCP tools, so asserting on it excluded every

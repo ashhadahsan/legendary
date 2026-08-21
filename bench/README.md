@@ -19,6 +19,18 @@ that cannot be recovered from the repository?
 |---|---|
 | `baseline` | no memory tooling |
 | `legendary` | `legendary init` defaults: both hooks + the MCP add-on |
+| `mem0` | mem0 via `bench/mem0_mcp.py`, stock config (requires `OPENAI_API_KEY`) |
+
+**Fairness of the mem0 arm.** The adapter is ours, not mem0's, and is
+published for audit. It is deliberately thin: two tools mapping straight onto
+`Memory.add` and `Memory.search`, with no filtering or prompt engineering on
+either side. mem0 performs its own fact extraction and semantic retrieval as
+designed. If you believe a different configuration performs better, it is one
+constructor call in `bench/mem0_mcp.py` - change it and re-run.
+
+An important asymmetry to state plainly: mem0 requires an LLM and an embedder
+by architecture; legendary requires neither. The mem0 arm therefore costs API
+spend that the other arms do not, and its results include that dependency.
 
 Both run with `--strict-mcp-config`; `baseline` gets an empty server map so it
 cannot inherit ambient MCP servers.
