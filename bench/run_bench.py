@@ -77,10 +77,13 @@ ARMS = {
     "baseline": [],
     # the product's default install: hooks primary, MCP add-on
     "legendary": ["legendary", "hook"],
-    # head-to-head against a known memory tool. Requires OPENAI_API_KEY:
-    # mem0 needs an LLM for fact extraction and an embedder for retrieval.
-    # The adapter is bench/mem0_mcp.py, published for audit.
+    # head-to-head against a known memory tool. Requires OPENAI_API_KEY or
+    # GEMINI_API_KEY: mem0 needs an LLM for fact extraction and an embedder for
+    # retrieval. The adapter is bench/mem0_mcp.py, published for audit.
     "mem0": ["mem0"],
+    # are they complementary? mem0 has semantic breadth but only answers when
+    # asked; legendary pushes but matches on anchors and literal signatures.
+    "both": ["legendary", "hook", "mem0"],
 }
 
 GIT_ID = ["-c", "user.email=b@b.b", "-c", "user.name=bench"]

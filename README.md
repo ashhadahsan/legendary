@@ -225,10 +225,11 @@ only channel. n=10 per arm.
 legendary vs mem0: **p = 0.00705**. mem0 vs no memory at all: p = 0.695 -
 indistinguishable on this task.
 
-Both tools stored correct knowledge, and both were queried (mem0 stored in
-10/10 trials, was searched in 9/10). The difference was **when** the memory
-arrived: legendary's hook pushed it back at the moment the failure recurred, in
-10/10 trials. mem0 was searched once, early.
+Both tools stored correct knowledge and both were used as intended (mem0
+stored in 10/10 trials, searched in 9/10). legendary combines push hooks with
+agent-initiated recall; mem0 offers search only. **We have not isolated which
+part of legendary is responsible** - that needs a per-channel ablation we have
+not run.
 
 **It is not a universal win.** On a second scenario, where the needed knowledge
 was already in the model's priors, legendary had no effect and cost **54%

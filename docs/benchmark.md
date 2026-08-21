@@ -110,20 +110,38 @@ ToolSearch lookups - an early count of ours conflated the two), mem0 stored in
 detailed, capturing the full service contract including the quirk. Content was
 not the problem.
 
-### What actually differed: when the memory arrives
+### What differed - and a correction
 
-Both tools held the right knowledge and both were queried. The difference is
-timing.
+An earlier version of this page claimed legendary's `guard` hook "fired in
+10/10 trials, pushing the fix back at the moment the failure recurred." **That
+claim went further than the evidence supports, and is withdrawn.**
 
-legendary's `guard` hook fired in **10/10** trials, triggered by the error
-signatures stored with the episode (`assert 0.0 == 25.0`,
-`test_billing_reconciliation`). The fix was pushed back **at the moment the
-failure recurred** - repeatedly, without being asked. mem0 was searched once,
-early, and the agent then proceeded on its own; nothing re-delivered the
-knowledge when it became relevant again.
+What the data actually shows:
 
-That is a claim about *delivery*, not about storage or retrieval quality, and
-it is the specific thesis v0.2 was rebuilt around. mem0 is a mature tool with
+- A push hook fired in 10/10 legendary trials (`hook_fired`), but `surface` and
+  `guard` write to the **same** `.surfaced-<session>` cache file, so that flag
+  cannot distinguish which one ran.
+- The harness records only assistant messages, so hook-injected context does
+  not appear in the saved transcripts at all. We cannot see what was delivered.
+- `recall` was actively called in 9/10 legendary trials. In the one trial where
+  it was not (trial 8), rediscoveries were still low (2), which is suggestive of
+  a hook contributing - but a single trial is not evidence.
+
+So the honest statement is: **legendary's combination of push hooks plus
+agent-initiated recall outperformed mem0's search-only channel, and we have not
+isolated which part is responsible.** The delivery-timing explanation remains
+our hypothesis, not a measured result.
+
+What is measured and not in doubt: both tools stored correct knowledge, both
+were used as intended, and the outcomes differed by an order of magnitude.
+
+### Deciding what earns its cost
+
+Attribution requires an ablation - separate arms for guard-only, surface-only,
+and MCP-only - which has not been run. Until it is, we cannot say which
+capability pays for itself, and we will not imply otherwise. Scenario 3 already
+showed the whole package costing 54% more for no benefit when the knowledge was
+not needed; a per-channel breakdown is the next thing worth measuring. mem0 is a mature tool with
 capabilities legendary does not have - semantic search, cross-application
 memory, scale. On this task, none of that substituted for arriving at the right
 moment.
