@@ -10,18 +10,9 @@ from pathlib import Path
 from legendary import index as idx
 from legendary import service
 
-_CONFIG_TOML = """\
-# legendary configuration
-[rank]
-# score = fts*w_fts + overlap*w_overlap + recency*w_recency - stale_penalty*w_stale
-w_fts = 2.0
-w_overlap = 1.5
-w_recency = 0.5
-w_stale = 1.0
-"""
-
 _MCP_SNIPPET = """\
-Add legendary to your MCP client, e.g. Claude Code (.mcp.json):
+Hooks installed in .claude/settings.json (primary channel - memories arrive
+automatically). Optional add-on, agent-initiated search via MCP (.mcp.json):
 
 {
   "mcpServers": {
@@ -32,20 +23,47 @@ Add legendary to your MCP client, e.g. Claude Code (.mcp.json):
   }
 }
 
-Claude Code hooks (.claude/settings.json) for auto-capture:
-
-{
-  "hooks": {
-    "PreToolUse": [{"matcher": "Read|Edit|Write",
-      "hooks": [{"type": "command",
-      "command": "uvx --from legendary-mcp legendary surface --repo %s"}]}]
-  }
-}
-
-Suggested CLAUDE.md snippet:
-  Before editing a file, call the legendary `recall` tool with the file path
-  in files_in_focus. After decisions or failed attempts, call `remember`.
+Suggested CLAUDE.md line:
+  When an approach fails, call the legendary `remember` tool with type=episode
+  and the verbatim error string as a trigger.
 """
+
+
+def _install_hooks(repo: Path) -> None:
+    """Merge legendary's hooks into .claude/settings.json, idempotently.
+
+    Never clobbers user configuration: unknown keys and existing hook entries
+    are preserved; our entries are recognized by their command substring."""
+    settings_path = repo / ".claude" / "settings.json"
+    try:
+        settings = json.loads(settings_path.read_text())
+    except (OSError, json.JSONDecodeError):
+        settings = {}
+    hooks = settings.setdefault("hooks", {})
+    wanted = {
+        "PreToolUse": (
+            "Read|Edit|Write",
+            f"uvx --from legendary-mcp legendary surface --repo {repo}",
+        ),
+        "PostToolUse": (
+            "Bash",
+            f"uvx --from legendary-mcp legendary guard --repo {repo}",
+        ),
+    }
+    for event, (matcher, command) in wanted.items():
+        entries = hooks.setdefault(event, [])
+        marker = command.split(" --repo ")[0]
+        if not any(
+            marker in h.get("command", "") for e in entries for h in e.get("hooks", [])
+        ):
+            entries.append(
+                {
+                    "matcher": matcher,
+                    "hooks": [{"type": "command", "command": command}],
+                }
+            )
+    settings_path.parent.mkdir(exist_ok=True)
+    settings_path.write_text(json.dumps(settings, indent=2) + "\n")
 
 
 def _cmd_init(repo: Path) -> int:
@@ -56,9 +74,6 @@ def _cmd_init(repo: Path) -> int:
         )
         return 1
     (repo / ".legendary" / "memories").mkdir(parents=True, exist_ok=True)
-    config = repo / ".legendary" / "config.toml"
-    if not config.exists():
-        config.write_text(_CONFIG_TOML)
     gitignore = repo / ".gitignore"
     existing = gitignore.read_text() if gitignore.exists() else ""
     additions = [
@@ -73,9 +88,10 @@ def _cmd_init(repo: Path) -> int:
             + "\n".join(additions)
             + "\n"
         )
+    _install_hooks(repo)
     idx.rebuild(repo)
     print(f"initialized .legendary/ in {repo}\n")
-    print(_MCP_SNIPPET % (repo, repo))
+    print(_MCP_SNIPPET % repo)
     return 0
 
 

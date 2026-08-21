@@ -9,20 +9,54 @@ def run_cli(*args, cwd: Path, capsys) -> tuple[int, str]:
     return code, capsys.readouterr().out
 
 
-def test_init_scaffolds(repo: Path, capsys):
+def test_init_scaffolds_and_installs_hooks(repo: Path, capsys):
     code, out = run_cli("init", cwd=repo, capsys=capsys)
     assert code == 0
     assert (repo / ".legendary" / "memories").is_dir()
-    assert (repo / ".legendary" / "config.toml").exists()
     assert ".legendary/index.db" in (repo / ".gitignore").read_text()
-    assert "mcpServers" in out  # prints MCP setup snippet
+    settings = json.loads((repo / ".claude" / "settings.json").read_text())
+    hooks = settings["hooks"]
+    assert any(
+        "legendary surface" in h["hooks"][0]["command"] for h in hooks["PreToolUse"]
+    )
+    assert any(
+        "legendary guard" in h["hooks"][0]["command"] for h in hooks["PostToolUse"]
+    )
+    assert "mcpServers" in out  # MCP remains available as the printed add-on
 
 
-def test_init_twice_is_safe(repo: Path, capsys):
+def test_init_twice_is_safe_and_idempotent(repo: Path, capsys):
     assert run_cli("init", cwd=repo, capsys=capsys)[0] == 0
     assert run_cli("init", cwd=repo, capsys=capsys)[0] == 0
-    # .gitignore entry not duplicated
     assert (repo / ".gitignore").read_text().count(".legendary/index.db") == 1
+    settings = json.loads((repo / ".claude" / "settings.json").read_text())
+    assert len(settings["hooks"]["PreToolUse"]) == 1  # not duplicated
+
+
+def test_init_preserves_existing_user_hooks(repo: Path, capsys):
+    claude = repo / ".claude"
+    claude.mkdir(exist_ok=True)
+    (claude / "settings.json").write_text(
+        json.dumps(
+            {
+                "hooks": {
+                    "PreToolUse": [
+                        {
+                            "matcher": "Bash",
+                            "hooks": [{"type": "command", "command": "echo mine"}],
+                        }
+                    ]
+                },
+                "env": {"FOO": "1"},
+            }
+        )
+    )
+    run_cli("init", cwd=repo, capsys=capsys)
+    settings = json.loads((claude / "settings.json").read_text())
+    assert settings["env"] == {"FOO": "1"}  # untouched
+    commands = [h["hooks"][0]["command"] for h in settings["hooks"]["PreToolUse"]]
+    assert "echo mine" in commands
+    assert any("legendary surface" in c for c in commands)
 
 
 def test_init_outside_git_repo_fails(tmp_path: Path, capsys):
