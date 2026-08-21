@@ -242,10 +242,19 @@ def trial(arm: str, index: int, workdir: Path) -> dict:
     # configuration is classified, not silently averaged in ----
     activation_failures = []
     if "legendary" in tools:
-        for s in (s1, s2):
-            if "mcp__legendary__recall" not in s.get("mcp_tools_offered", []):
-                activation_failures.append("mcp_tools_not_offered")
-                break
+        # Assert from OBSERVED USE, not from the init event's tool list: that
+        # list does not enumerate MCP tools, so asserting on it excluded every
+        # legendary trial while the agent was demonstrably calling recall and
+        # remember. Activation means a channel actually carried something.
+        channel_worked = (
+            s1.get("used_recall")
+            or s1.get("used_remember")
+            or s2.get("used_recall")
+            or s2.get("used_remember")
+            or hook_fired
+        )
+        if not channel_worked:
+            activation_failures.append("no_legendary_channel_activated")
         if wrote_memory is False:
             activation_failures.append("no_memory_written_in_s1")
 

@@ -1,11 +1,11 @@
 {
   "arm": "baseline",
-  "trial": 0,
+  "trial": 1,
   "session_1": {
-    "cost_usd": 0.4712334999999999,
-    "num_turns": 12,
-    "output_tokens": 3338,
-    "duration_s": 53.0,
+    "cost_usd": 0.583657,
+    "num_turns": 14,
+    "output_tokens": 6018,
+    "duration_s": 89.6,
     "is_error": false,
     "mcp_tools_offered": [],
     "used_recall": false,
@@ -16,10 +16,10 @@
     }
   },
   "session_2": {
-    "cost_usd": 0.6314914999999999,
-    "num_turns": 20,
-    "output_tokens": 7085,
-    "duration_s": 98.2,
+    "cost_usd": 0.5961745,
+    "num_turns": 15,
+    "output_tokens": 6955,
+    "duration_s": 103.7,
     "is_error": false,
     "mcp_tools_offered": [],
     "used_recall": false,
