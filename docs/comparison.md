@@ -41,6 +41,30 @@ legendary also gets temporality for free where they had to build for it: since
 memories are git-tracked files, `git log .legendary/` *is* the ingestion
 history and `git checkout` *is* a point-in-time query.
 
+## Operational cost: what it takes to run each
+
+We attempted a head-to-head benchmark against mem0 and could not run it on a
+clean machine. Recorded here because it is a real, reproducible difference,
+not a rhetorical one (mem0 2.0.18, checked 2026-08-21):
+
+| requirement | mem0 (defaults) | legendary |
+|---|---|---|
+| Vector store | Qdrant | none - SQLite FTS5 |
+| Embedding model | required | none |
+| **LLM API key** | **required** - every LLM provider needs a key, or a local Ollama install | **none** |
+| Self-hosted stack | commonly Qdrant + Neo4j + Ollama via Docker | none |
+| Install | clone/compose, or cloud API keys | `uvx --from legendary-mcp legendary init` |
+
+`Memory()` with stock configuration raises `OpenAIError: Missing credentials`
+before it can store anything. That is not a criticism of mem0's design - fact
+extraction and semantic search genuinely need a model - it is the cost of the
+architecture. legendary makes the opposite trade: no LLM anywhere in the write
+or read path, which is why it installs in one command and runs offline.
+
+**The head-to-head benchmark remains unrun.** It needs an API key or a local
+Ollama, and we will not publish a comparison we have not actually measured. If
+you have run one, we would like to see it.
+
 ## Why we did not build a knowledge graph
 
 The retrieval-vs-utilization literature reports accuracy moving ~20 points
