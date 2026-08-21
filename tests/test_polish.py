@@ -93,3 +93,44 @@ def test_surface_unanchored_file_silent(repo: Path, monkeypatch, capsys):
 def test_surface_garbage_stdin_exits_zero(repo: Path, monkeypatch):
     monkeypatch.setattr("sys.stdin", io.StringIO("not json"))
     assert cli.main(["surface", "--repo", str(repo)]) == 0
+
+
+def test_supersede_requires_anchor_coverage(repo: Path):
+    # Observed in trial forensics: a narrow memory deprecated a broader one,
+    # leaving a file with no active memory. Coverage must be enforced.
+    old_id = service.remember(
+        repo_root=repo,
+        type="decision",
+        title="broad rule",
+        body="applies to worker",
+        anchors=[{"file": "src/sync/worker.py"}],
+    )["id"]
+    with pytest.raises(ValueError, match="src/sync/worker.py"):
+        service.remember(
+            repo_root=repo,
+            type="decision",
+            title="narrow rule",
+            body="applies to nothing",
+            anchors=[],
+            supersedes=old_id,
+        )
+    assert load(repo, old_id).status == "active"  # nothing was destroyed
+
+
+def test_supersede_with_coverage_succeeds(repo: Path):
+    old_id = service.remember(
+        repo_root=repo,
+        type="decision",
+        title="broad rule two",
+        body="worker rule",
+        anchors=[{"file": "src/sync/worker.py"}],
+    )["id"]
+    new_id = service.remember(
+        repo_root=repo,
+        type="decision",
+        title="broader rule",
+        body="worker rule refined",
+        anchors=[{"file": "src/sync/worker.py"}],
+        supersedes=old_id,
+    )["id"]
+    assert load(repo, old_id).superseded_by == new_id

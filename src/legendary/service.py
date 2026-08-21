@@ -65,6 +65,14 @@ def remember(
                 f"anchor file not found: {anchor.file} - "
                 "check the path or retry with a line range"
             ) from exc
+    if old is not None:
+        missing = {a.file for a in old.anchors} - {a.file for a in resolved}
+        if missing:
+            raise ValueError(
+                f"supersede blocked: the new memory does not cover anchors "
+                f"{sorted(missing)} of {old.id}. Anchor the replacement to those "
+                "files too, or use deprecate(reason=...) instead of supersedes."
+            )
     try:
         memory = Memory(
             id=Memory.new_id(title, created),
