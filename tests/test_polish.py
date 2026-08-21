@@ -134,3 +134,10 @@ def test_supersede_with_coverage_succeeds(repo: Path):
         supersedes=old_id,
     )["id"]
     assert load(repo, old_id).superseded_by == new_id
+
+
+def test_surface_fresh_memory_is_marked_verified(repo: Path, monkeypatch, capsys):
+    remember_one(repo)
+    _, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py")
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "(verified against current code)" in ctx

@@ -1,4 +1,4 @@
-"""legendary CLI: init | search | reindex | doctor | surface | mcp."""
+"""legendary CLI: init | search | reindex | doctor | surface | guard | mcp."""
 
 from __future__ import annotations
 
@@ -104,6 +104,22 @@ def _cmd_doctor(repo: Path) -> int:
     return 0
 
 
+def _render_memory(m: object, verdict: str) -> str:
+    """Imperative guardrail rendering shared by surface and guard.
+
+    Fresh carries the affordance that licenses acting without re-derivation;
+    stale carries the instruction to verify. Both are the product's voice."""
+    title = getattr(m, "title")
+    body = getattr(m, "body")[:300]
+    mtype = getattr(m, "type")
+    if verdict == "fresh":
+        return f"- [{mtype}] {title} (verified against current code): {body}"
+    return (
+        f"- [{mtype}] {title} [{verdict} - code changed since this was "
+        f"written; verify before trusting]: {body}"
+    )
+
+
 def _cmd_surface(repo: Path) -> int:
     """PreToolUse hook: surface memories anchored to the file being touched."""
     try:
@@ -139,10 +155,7 @@ def _cmd_surface(repo: Path) -> int:
         if m is None or m.status != "active":
             continue
         verdict = worst_verdict(check_memory(repo, m.anchors))
-        flag = (
-            "" if verdict == "fresh" else f" [{verdict} - verify against current code]"
-        )
-        lines.append(f"- [{m.type}] {m.title}{flag}: {m.body[:300]}")
+        lines.append(_render_memory(m, verdict))
         rendered.append(mid)
     if not lines:
         return 0
@@ -157,6 +170,65 @@ def _cmd_surface(repo: Path) -> int:
                     "hookEventName": "PreToolUse",
                     "additionalContext": (
                         f"Legendary memories anchored to {rel}:\n" + "\n".join(lines)
+                    ),
+                }
+            }
+        )
+    )
+    return 0
+
+
+def _cmd_guard(repo: Path) -> int:
+    """PostToolUse hook on Bash: inject episodes whose triggers match output.
+
+    A recurring error string is the highest-fidelity experience-following
+    signal an agent emits - no query formulation needed. Any internal failure
+    exits 0: a broken hook must never break the agent.
+    """
+    try:
+        hook = json.load(sys.stdin)
+    except Exception:
+        return 0
+    if hook.get("tool_name") != "Bash":
+        return 0
+    haystack = json.dumps(hook.get("tool_response") or {}).lower()
+    if not haystack or haystack == "{}":
+        return 0
+    from legendary.index import all_triggers
+
+    matched_ids = {mid for mid, trig in all_triggers(repo) if trig.lower() in haystack}
+    if not matched_ids:
+        return 0
+    session = hook.get("session_id") or "default"
+    cache = repo / ".legendary" / f".surfaced-{session}"
+    seen = set(cache.read_text().split()) if cache.exists() else set()
+    new_ids = sorted(matched_ids - seen)
+    if not new_ids:
+        return 0
+    from legendary.stale import check_memory, worst_verdict
+    from legendary.store import load
+
+    lines = []
+    rendered: list[str] = []
+    for mid in new_ids[:3]:
+        m = load(repo, mid)
+        if m is None or m.status != "active":
+            continue
+        verdict = worst_verdict(check_memory(repo, m.anchors))
+        lines.append(_render_memory(m, verdict))
+        rendered.append(mid)
+    if not lines:
+        return 0
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    cache.write_text(" ".join(sorted(seen | set(rendered))))
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PostToolUse",
+                    "additionalContext": (
+                        "This failure has been seen before. Recorded episodes:\n"
+                        + "\n".join(lines)
                     ),
                 }
             }
@@ -197,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_repo(sub.add_parser("reindex"))
     _add_repo(sub.add_parser("doctor"))
     _add_repo(sub.add_parser("surface"))
+    _add_repo(sub.add_parser("guard"))
     _add_repo(sub.add_parser("mcp"))
 
     args = parser.parse_args(argv)
@@ -212,6 +285,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_doctor(repo)
         case "surface":
             return _cmd_surface(repo)
+        case "guard":
+            return _cmd_guard(repo)
         case "mcp":
             return _cmd_mcp(repo)
     return 2
