@@ -5,3 +5,5 @@ dist/
 .pytest_cache/
 site/
 dist/
+.env
+.env.*

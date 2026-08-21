@@ -19,7 +19,7 @@ that cannot be recovered from the repository?
 |---|---|
 | `baseline` | no memory tooling |
 | `legendary` | `legendary init` defaults: both hooks + the MCP add-on |
-| `mem0` | mem0 via `bench/mem0_mcp.py`, stock config (requires `OPENAI_API_KEY`) |
+| `mem0` | mem0 via `bench/mem0_mcp.py`, stock config (requires `OPENAI_API_KEY` or `GEMINI_API_KEY`) |
 
 **Fairness of the mem0 arm.** The adapter is ours, not mem0's, and is
 published for audit. It is deliberately thin: two tools mapping straight onto

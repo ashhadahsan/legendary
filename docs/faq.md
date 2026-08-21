@@ -33,6 +33,19 @@ rebuilds itself.
 Because the reasoning usually outlives the code. Hiding it loses knowledge;
 flagging it lets the agent judge.
 
+**Does it work with Gemini CLI, Cursor, Codex, or other agents?**
+Partly, and the difference matters. The MCP tools (`remember`, `recall`,
+`deprecate`) work in any MCP host, Gemini CLI included. The **hooks do not** -
+`surface` and `guard` are wired through Claude Code's `PreToolUse`/`PostToolUse`
+settings format, which is Claude Code specific.
+
+Since v0.2 the hooks are the primary channel, that is a real limitation rather
+than a footnote: on non-Claude-Code hosts you get agent-initiated search only,
+which is the weaker half of the product. Both `surface` and `guard` are plain
+CLI commands that read hook JSON on stdin and print JSON out, so any host with
+an equivalent hook mechanism can drive them - but we have only tested Claude
+Code, and we will not claim otherwise until we have.
+
 **What languages support symbol anchoring?**
 Python, JavaScript, TypeScript, TSX. Line-range and whole-file anchoring work
 for any language, and unsupported files degrade gracefully rather than failing.

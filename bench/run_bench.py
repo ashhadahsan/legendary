@@ -109,6 +109,8 @@ def mcp_config(tools: list[str], repo: Path) -> dict:
                 "mem0ai",
                 "--with",
                 "mcp>=2.0",
+                "--with",
+                "google-genai",
                 "python",
                 str(BENCH / "mem0_mcp.py"),
                 "--repo",
