@@ -26,9 +26,7 @@ def test_naive_created_does_not_break_recall(repo: Path):
     assert m.created.tzinfo is not None  # coerced to UTC at validation
     save(repo, m)
     rebuild(repo)
-    results = recall(
-        repo, "hand edited", now=datetime(2026, 8, 14, tzinfo=timezone.utc)
-    )
+    results = recall(repo, "hand edited")
     assert results[0]["id"] == "mem-naive"
 
 
