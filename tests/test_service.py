@@ -14,6 +14,7 @@ def remember_one(repo: Path, **kw):
         body="busy_timeout fixes it",
         anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
         tags=["sqlite"],
+        triggers=["sqlite3.OperationalError: database is locked"],
     )
     defaults.update(kw)
     return service.remember(**defaults)
@@ -79,3 +80,22 @@ def test_stale_report_lists_only_problems(repo: Path):
     p.unlink()
     report = service.stale_report(repo)
     assert report[0]["staleness"] == "orphaned"
+
+
+def test_episode_without_triggers_rejected(repo: Path):
+    with pytest.raises(ValueError, match="triggers"):
+        service.remember(
+            repo_root=repo, type="episode", title="x", body="y", anchors=[]
+        )
+
+
+def test_episode_with_triggers_saved(repo: Path):
+    result = service.remember(
+        repo_root=repo,
+        type="episode",
+        title="locked",
+        body="y",
+        anchors=[],
+        triggers=["database is locked"],
+    )
+    assert load(repo, result["id"]).triggers == ["database is locked"]

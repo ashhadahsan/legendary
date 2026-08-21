@@ -54,7 +54,7 @@ def test_non_dict_anchor_raises_value_error_not_type_error(repo: Path):
     with pytest.raises(ValueError, match="must be an object"):
         service.remember(
             repo_root=repo,
-            type="episode",
+            type="decision",
             title="x",
             body="y",
             anchors=["src/sync/worker.py"],  # type: ignore[list-item]
@@ -230,6 +230,7 @@ def test_stemming_matches_word_forms(repo: Path):
         type="episode",
         title="WAL deadlocked on retry",
         body="Wrapping retries in a transaction deadlocked under concurrency.",
+        triggers=["database is locked"],
     )
     for query in ("deadlock", "deadlocks", "deadlocked", "transactions", "wrap"):
         assert service.recall(repo, query), f"{query!r} should match"
@@ -275,6 +276,7 @@ def test_mcp_recall_omits_internal_fields(repo: Path):
         type="episode",
         title="delta finding",
         body="delta body",
+        triggers=["delta error"],
         anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
     )
     server = build_server(repo)
@@ -301,6 +303,7 @@ def test_mcp_recall_reports_commit_when_stale(repo: Path):
         type="episode",
         title="epsilon finding",
         body="epsilon body",
+        triggers=["epsilon error"],
         anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
     )
     p = repo / "src/sync/worker.py"

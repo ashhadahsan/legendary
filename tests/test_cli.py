@@ -38,6 +38,7 @@ def seed(repo):
         body="busy_timeout",
         anchors=[{"file": "src/sync/worker.py"}],
         tags=["sqlite"],
+        triggers=["sqlite3.OperationalError: database is locked"],
     )
 
 

@@ -165,10 +165,10 @@ def _cmd_surface(repo: Path) -> int:
     return 0
 
 
-def _cmd_mcp(repo: Path, transport: str, host: str, port: int) -> int:
+def _cmd_mcp(repo: Path) -> int:
     from legendary.mcp_server import run
 
-    run(repo, transport=transport, host=host, port=port)
+    run(repo)
     return 0
 
 
@@ -197,15 +197,7 @@ def main(argv: list[str] | None = None) -> int:
     _add_repo(sub.add_parser("reindex"))
     _add_repo(sub.add_parser("doctor"))
     _add_repo(sub.add_parser("surface"))
-    p_mcp = _add_repo(sub.add_parser("mcp"))
-    p_mcp.add_argument(
-        "--transport",
-        choices=["stdio", "http"],
-        default="stdio",
-        help="stdio (default) or stateless streamable HTTP",
-    )
-    p_mcp.add_argument("--host", default="127.0.0.1")
-    p_mcp.add_argument("--port", type=int, default=8787)
+    _add_repo(sub.add_parser("mcp"))
 
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
@@ -221,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         case "surface":
             return _cmd_surface(repo)
         case "mcp":
-            return _cmd_mcp(repo, args.transport, args.host, args.port)
+            return _cmd_mcp(repo)
     return 2
 
 

@@ -16,6 +16,7 @@ def remember_one(repo: Path, title: str = "wal deadlock", **kw):
         body="busy_timeout",
         anchors=[{"file": "src/sync/worker.py", "symbol": "SyncWorker.run"}],
         tags=[],
+        triggers=["sqlite3.OperationalError: database is locked"],
     )
     defaults.update(kw)
     return service.remember(**defaults)
