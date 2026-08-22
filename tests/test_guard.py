@@ -177,3 +177,67 @@ def test_invariant_trigger_does_not_warn(repo: Path):
         triggers=["sqlite3.OperationalError: database is locked"],
     )
     assert "trigger_warnings" not in r
+
+
+def test_guard_writes_an_audit_record(repo: Path, monkeypatch, capsys):
+    """Hook output never appears in the agent transcript, so delivery is
+    otherwise unobservable - this log is the only evidence a hook fired."""
+    import json as _json
+
+    mid = seed_episode(repo)
+    guard(
+        repo, monkeypatch, capsys, "sqlite3.OperationalError: database is locked", "a1"
+    )
+    log = repo / ".legendary" / ".injections.jsonl"
+    assert log.exists()
+    rec = _json.loads(log.read_text().strip().splitlines()[-1])
+    assert rec["hook"] == "guard"
+    assert rec["session_id"] == "a1"
+    assert mid in rec["memory_ids"]
+    assert rec["triggers"] == ["sqlite3.OperationalError: database is locked"]
+    assert rec["ts"]
+
+
+def test_surface_writes_an_audit_record(repo: Path, monkeypatch, capsys):
+    import io as _io
+    import json as _json
+
+    service.remember(
+        repo_root=repo,
+        type="decision",
+        title="worker rule",
+        body="b",
+        anchors=[{"file": "src/sync/worker.py"}],
+    )
+    payload = {
+        "session_id": "a2",
+        "tool_name": "Read",
+        "tool_input": {"file_path": str(repo / "src/sync/worker.py")},
+    }
+    monkeypatch.setattr("sys.stdin", _io.StringIO(_json.dumps(payload)))
+    cli.main(["surface", "--repo", str(repo)])
+    capsys.readouterr()
+    rec = _json.loads(
+        (repo / ".legendary" / ".injections.jsonl").read_text().strip().splitlines()[-1]
+    )
+    assert rec["hook"] == "surface"
+    assert rec["file"] == "src/sync/worker.py"
+    assert rec["memory_ids"]
+
+
+def test_audit_failure_never_breaks_the_hook(repo: Path, monkeypatch, capsys):
+    """A broken audit log must not break the agent, so _audit swallows errors
+    and guard must still deliver its injection."""
+    seed_episode(repo)
+
+    def explode(*a, **k):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(Path, "open", explode)
+    cli._audit(repo, "guard", "s", ["mem-x"])  # must not raise
+    monkeypatch.undo()
+
+    code, out = guard(
+        repo, monkeypatch, capsys, "sqlite3.OperationalError: database is locked", "a3"
+    )
+    assert code == 0 and out.strip(), "the hook still delivers when auditing fails"

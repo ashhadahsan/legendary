@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 from legendary import index as idx
@@ -82,6 +83,7 @@ def _cmd_init(repo: Path) -> int:
             ".legendary/index.db",
             ".legendary/.surfaced-*",
             ".legendary/.guarded-*",
+            ".legendary/.injections.jsonl",
         )
         if e not in existing
     ]
@@ -122,6 +124,32 @@ def _cmd_doctor(repo: Path) -> int:
                 where = a.get("symbol") or a["file"]
                 print(f"    {a['staleness']}: {where} (was {a.get('commit', '?')})")
     return 0
+
+
+def _audit(
+    repo: Path, hook: str, session: str, memory_ids: list[str], **extra: object
+) -> None:
+    """Append one record of what a hook actually delivered.
+
+    Without this there is no way - for a user or for us - to answer "did the
+    hook do anything?". Hook output does not appear in the agent transcript,
+    and the dedupe caches record only that something happened, never what or
+    when. Never raises: a broken hook must not break the agent.
+    """
+    try:
+        line = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "hook": hook,
+            "session_id": session,
+            "memory_ids": memory_ids,
+            **extra,
+        }
+        path = repo / ".legendary" / ".injections.jsonl"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(line) + "\n")
+    except Exception:
+        pass
 
 
 def _render_memory(m: object, verdict: str) -> str:
@@ -183,6 +211,7 @@ def _cmd_surface(repo: Path) -> int:
     # Only what was actually shown counts as seen, so a 6th memory on a hot
     # file still surfaces later instead of being suppressed forever.
     cache.write_text(" ".join(sorted(seen | set(rendered))))
+    _audit(repo, "surface", session, rendered, file=rel)
     print(
         json.dumps(
             {
@@ -237,7 +266,10 @@ def _cmd_guard(repo: Path) -> int:
         return 0
     from legendary.index import all_triggers
 
-    matched_ids = {mid for mid, trig in all_triggers(repo) if trig.lower() in haystack}
+    matched = [
+        (mid, trig) for mid, trig in all_triggers(repo) if trig.lower() in haystack
+    ]
+    matched_ids = {mid for mid, _ in matched}
     if not matched_ids:
         return 0
     session = hook.get("session_id") or "default"
@@ -264,6 +296,13 @@ def _cmd_guard(repo: Path) -> int:
         return 0
     cache.parent.mkdir(parents=True, exist_ok=True)
     cache.write_text(" ".join(sorted(seen | set(rendered))))
+    _audit(
+        repo,
+        "guard",
+        session,
+        rendered,
+        triggers=[trig for mid, trig in matched if mid in rendered],
+    )
     print(
         json.dumps(
             {
