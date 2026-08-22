@@ -78,51 +78,59 @@ first try.
 
 *(table and analysis above)*
 
-## Ablation: the hooks are not what wins
+## Ablation: RETRACTED (2026-08-21)
 
-We rebuilt this product around push delivery. We then measured which channel
-actually does the work, and **the answer contradicts the rebuild's premise.**
+We published a conclusion here that **"the hooks are not what wins."** It is
+**withdrawn**. Both arms were misconfigured, in ways that made the comparison
+meaningless. The contribution of the hooks is **unknown, not zero.**
 
-| arm | n | median rediscoveries | raw |
-|---|---|---|---|
-| baseline | 10 | 9.5 | `[1,6,7,7,9,10,10,12,12,15]` |
-| **hooks only** (push, no MCP) | 10 | **6.5** | `[0,1,3,5,6,7,7,11,17,21]` |
-| **recall only** (MCP, no hooks) | 10 | **1.0** | `[0,1,1,1,1,1,1,1,1,3]` |
-| legendary (both channels) | 10 | 1.0 | `[0,1,1,1,1,1,2,2,2,2]` |
+### Why each arm was invalid
 
-- hooks-only vs recall-only: **p = 0.0025** - the push channel is significantly
-  worse.
-- hooks-only vs baseline: **p = 0.17** - push delivery alone is *not*
-  statistically better than having no memory at all.
-- recall-only vs full legendary: **p = 0.83** - adding the hooks to recall
-  changes nothing measurable.
+**`legendary_hooks_only` never stored anything.** The arm was defined as
+"hooks, no MCP" — but legendary has no write path other than the MCP `remember`
+tool (there is no `remember` CLI subcommand). With MCP absent the store could
+never be populated: `wrote_memory: false` in 10/10 trials, and the preserved
+trial repos contain no `memories/` directory at all. It was also broken a second
+way: `reset_repo`'s keep-list tested `"legendary" in ARMS[arm]`, which is False
+for `["hook_only"]`, so `git clean` deleted `.legendary/` at the session
+boundary regardless. The arm measured hooks over a permanently empty store —
+which is baseline.
 
-**The MCP `recall` tool is doing the work.** Code-anchored storage with
-keyword retrieval, called deliberately by the agent, is what beats mem0. The
-hooks - the mechanism v0.2 was designed around, and the thing we cut features
-to prioritise - contribute nothing detectable on this task.
+**`legendary_recall_only` was not hook-free.** `legendary init` installs both
+hooks unconditionally, so that arm had them too, and `surface` demonstrably
+fired in 9/9 valid trials (`.surfaced-*` caches present in the preserved repos,
+session ids matching session 2). The harness reported `surface_fired: None`
+only because that field was gated on the arm's *label* rather than observed
+from disk.
 
-### What we think went wrong with the hooks
+So "recall-only" and "full legendary" were **the same configuration**. The
+p=0.83 between them is two identical setups agreeing — a reproducibility check,
+not an ablation.
 
-A hypothesis, not a measured result: episode triggers are matched as literal
-substrings. Session 1 stores triggers like `test_billing_reconciliation` and
-`assert 0.0 == 25.0`; session 2 fails with `test_refund_reconciliation` and a
-different assertion. The knowledge is present and correct, and the guard hook
-never fires because no stored string appears in the new error. If that is
-right, the fix is trigger normalisation or fuzzy matching, not more push.
+### The process failure, which matters more than the arms
 
-### What this costs us
+The harness *did* catch this: all ten `hooks_only` records carry
+`activation_failures: ["no_hook_fired"]`. But `report.py`'s `ARM_ORDER` listed
+only `baseline` and `legendary`, so ablation arms never passed through the
+exclusion gate — and the median we published was computed by hand, outside the
+gate that had already rejected every trial in that arm.
 
-The v0.2 redesign deleted `extract`, `inject`, two memory types, two MCP tools,
-and the HTTP transport, justified substantially by the argument that "the hook
-is the product; the database was the fantasy." That argument is not supported
-by this data. The deletions may still be defensible on other grounds - none of
-them were measured either - but the reasoning we gave for them was wrong, and
-we are not going to leave that unsaid.
+The guard existed and worked. The analysis went around it.
 
-**What survives unchanged:** legendary still beats mem0 by roughly 10x
-(p = 0.007), and still beats no-memory. The result is real. Our explanation of
-*why* was wrong.
+### Also corrected: the `both` arm is n=4, not n=10
+
+6 of its 10 trials carry `no_memory_written_in_s1`. The earlier table reported
+n=10. Its median (1.0) is unchanged on the 4 valid trials, but the sample size
+was overstated.
+
+### What is unaffected
+
+The **mem0 comparison stands**: `baseline`, `mem0` and `legendary` were all
+correctly configured, and nothing in this retraction touches them. legendary
+median 1.0 vs mem0 11.5 vs baseline 9.5, p=0.007.
+
+Raw data for every trial, including the invalid ones, is preserved under
+`bench/results/artifacts/`.
 
 ## Head-to-head vs mem0 (n=10 per arm, same scenario)
 
@@ -151,7 +159,7 @@ legendary [0, 1, 1, 1, 1, 1, 2, 2, 2, 2]        = 13
 | arm | n | median | raw | total rediscoveries |
 |---|---|---|---|---|
 | mem0 | 10 | 11.5 | | 111 |
-| both | 10 | **1.0** | `[0,0,1,1,1,1,5,5,9,20]` | 43 |
+| both | 4 (6 excluded) | **1.0** | `[0,0,1,1,1,1,5,5,9,20]` (all 10 shown; 6 failed activation) | 43 |
 | legendary | 10 | **1.0** | `[0,1,1,1,1,1,2,2,2,2]` | **13** |
 
 Same median, but no measurable benefit and clearly worse stability: legendary

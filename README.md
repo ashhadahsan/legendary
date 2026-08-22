@@ -225,12 +225,11 @@ only channel. n=10 per arm.
 legendary vs mem0: **p = 0.00705**. mem0 vs no memory at all: p = 0.695 -
 indistinguishable on this task.
 
-**An ablation showed the hooks are not what wins.** Splitting the channels
-(n=10 each): recall-only medians 1.0, hooks-only medians 6.5 - not
-significantly better than no memory at all (p=0.17). Adding hooks to recall
-changes nothing (p=0.83). The MCP `recall` tool over code-anchored storage is
-doing the work, which contradicts the premise v0.2 was rebuilt on. We have
-published that rather than quietly dropping it.
+We published an ablation claiming the hooks are not what wins. **It has been
+retracted** - both arms were misconfigured (one had no way to write memories at
+all; the other still had hooks installed, so it was the same configuration as
+full legendary). Which channel drives the result is **unknown**. Details and
+raw data: [benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
 
 **It is not a universal win.** On a second scenario, where the needed knowledge
 was already in the model's priors, legendary had no effect and cost **54%
