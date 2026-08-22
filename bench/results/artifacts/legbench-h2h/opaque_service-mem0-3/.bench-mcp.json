@@ -1,0 +1,1 @@
+{"mcpServers": {"mem0": {"command": "uv", "args": ["run", "--isolated", "--with", "mem0ai", "--with", "mcp>=2.0", "--with", "google-genai", "python", "/Users/ashhad/legendary/bench/mem0_mcp.py", "--repo", "/tmp/legbench-h2h/opaque_service-mem0-3"]}}}

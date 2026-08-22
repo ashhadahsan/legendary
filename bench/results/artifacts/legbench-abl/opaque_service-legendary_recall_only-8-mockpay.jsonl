@@ -1,0 +1,8 @@
+{"endpoint": "batch", "n_records": 3, "n_dropped_float": 3}
+{"endpoint": "batch", "n_records": 3, "n_dropped_float": 3}
+{"endpoint": "batch", "n_records": 3, "n_dropped_float": 0}
+{"endpoint": "batch", "n_records": 3, "n_dropped_float": 0}
+{"endpoint": "refund", "n_records": 2, "n_dropped_float": 2}
+{"endpoint": "refund", "n_records": 2, "n_dropped_float": 0}
+{"endpoint": "refund", "n_records": 2, "n_dropped_float": 0}
+{"endpoint": "refund", "n_records": 2, "n_dropped_float": 0}

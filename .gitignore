@@ -7,3 +7,6 @@ site/
 dist/
 .env
 .env.*
+
+# preserved benchmark evidence is committed on purpose
+!bench/results/artifacts/

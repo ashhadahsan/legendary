@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from legendary-mcp legendary surface --repo /private/tmp/legbench-v3/reverted_approach-legendary-5"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from legendary-mcp legendary guard --repo /private/tmp/legbench-v3/reverted_approach-legendary-5"
+          }
+        ]
+      }
+    ]
+  }
+}
