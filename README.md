@@ -225,11 +225,12 @@ only channel. n=10 per arm.
 legendary vs mem0: **p = 0.00705**. mem0 vs no memory at all: p = 0.695 -
 indistinguishable on this task.
 
-Both tools stored correct knowledge and both were used as intended (mem0
-stored in 10/10 trials, searched in 9/10). legendary combines push hooks with
-agent-initiated recall; mem0 offers search only. **We have not isolated which
-part of legendary is responsible** - that needs a per-channel ablation we have
-not run.
+**An ablation showed the hooks are not what wins.** Splitting the channels
+(n=10 each): recall-only medians 1.0, hooks-only medians 6.5 - not
+significantly better than no memory at all (p=0.17). Adding hooks to recall
+changes nothing (p=0.83). The MCP `recall` tool over code-anchored storage is
+doing the work, which contradicts the premise v0.2 was rebuilt on. We have
+published that rather than quietly dropping it.
 
 **It is not a universal win.** On a second scenario, where the needed knowledge
 was already in the model's priors, legendary had no effect and cost **54%

@@ -78,6 +78,52 @@ first try.
 
 *(table and analysis above)*
 
+## Ablation: the hooks are not what wins
+
+We rebuilt this product around push delivery. We then measured which channel
+actually does the work, and **the answer contradicts the rebuild's premise.**
+
+| arm | n | median rediscoveries | raw |
+|---|---|---|---|
+| baseline | 10 | 9.5 | `[1,6,7,7,9,10,10,12,12,15]` |
+| **hooks only** (push, no MCP) | 10 | **6.5** | `[0,1,3,5,6,7,7,11,17,21]` |
+| **recall only** (MCP, no hooks) | 10 | **1.0** | `[0,1,1,1,1,1,1,1,1,3]` |
+| legendary (both channels) | 10 | 1.0 | `[0,1,1,1,1,1,2,2,2,2]` |
+
+- hooks-only vs recall-only: **p = 0.0025** - the push channel is significantly
+  worse.
+- hooks-only vs baseline: **p = 0.17** - push delivery alone is *not*
+  statistically better than having no memory at all.
+- recall-only vs full legendary: **p = 0.83** - adding the hooks to recall
+  changes nothing measurable.
+
+**The MCP `recall` tool is doing the work.** Code-anchored storage with
+keyword retrieval, called deliberately by the agent, is what beats mem0. The
+hooks - the mechanism v0.2 was designed around, and the thing we cut features
+to prioritise - contribute nothing detectable on this task.
+
+### What we think went wrong with the hooks
+
+A hypothesis, not a measured result: episode triggers are matched as literal
+substrings. Session 1 stores triggers like `test_billing_reconciliation` and
+`assert 0.0 == 25.0`; session 2 fails with `test_refund_reconciliation` and a
+different assertion. The knowledge is present and correct, and the guard hook
+never fires because no stored string appears in the new error. If that is
+right, the fix is trigger normalisation or fuzzy matching, not more push.
+
+### What this costs us
+
+The v0.2 redesign deleted `extract`, `inject`, two memory types, two MCP tools,
+and the HTTP transport, justified substantially by the argument that "the hook
+is the product; the database was the fantasy." That argument is not supported
+by this data. The deletions may still be defensible on other grounds - none of
+them were measured either - but the reasoning we gave for them was wrong, and
+we are not going to leave that unsaid.
+
+**What survives unchanged:** legendary still beats mem0 by roughly 10x
+(p = 0.007), and still beats no-memory. The result is real. Our explanation of
+*why* was wrong.
+
 ## Head-to-head vs mem0 (n=10 per arm, same scenario)
 
 The first comparison against a memory tool people actually use, rather than

@@ -1,0 +1,43 @@
+{
+  "scenario": "opaque_service",
+  "arm": "legendary_hooks_only",
+  "trial": 4,
+  "session_1": {
+    "cost_usd": 0.6330715,
+    "num_turns": 15,
+    "output_tokens": 6205,
+    "duration_s": 92.8,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": false,
+    "used_remember": false,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "session_2": {
+    "cost_usd": 0.6242160000000001,
+    "num_turns": 16,
+    "output_tokens": 7511,
+    "duration_s": 106.6,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": false,
+    "used_remember": false,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "s1_correct": true,
+  "s2_correct": true,
+  "s2_quirk_hits": 17,
+  "wrote_memory": false,
+  "hook_fired": false,
+  "surface_fired": false,
+  "guard_fired": false,
+  "activation_failures": [
+    "no_hook_fired"
+  ]
+}

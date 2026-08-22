@@ -1,0 +1,48 @@
+{
+  "scenario": "opaque_service",
+  "arm": "legendary_recall_only",
+  "trial": 9,
+  "session_1": {
+    "cost_usd": 0,
+    "num_turns": 1,
+    "output_tokens": 0,
+    "duration_s": 2.0,
+    "is_error": true,
+    "mcp_tools_offered": [],
+    "used_recall": false,
+    "used_remember": false,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "session_2": {
+    "cost_usd": 0,
+    "num_turns": 1,
+    "output_tokens": 0,
+    "duration_s": 2.1,
+    "is_error": true,
+    "mcp_tools_offered": [
+      "mcp__legendary__deprecate",
+      "mcp__legendary__recall",
+      "mcp__legendary__remember"
+    ],
+    "used_recall": false,
+    "used_remember": false,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 33
+    }
+  },
+  "s1_correct": false,
+  "s2_correct": false,
+  "s2_quirk_hits": 0,
+  "wrote_memory": false,
+  "hook_fired": null,
+  "surface_fired": null,
+  "guard_fired": null,
+  "activation_failures": [
+    "no_legendary_channel_activated",
+    "no_memory_written_in_s1"
+  ]
+}
