@@ -123,6 +123,36 @@ The guard existed and worked. The analysis went around it.
 n=10. Its median (1.0) is unchanged on the 4 valid trials, but the sample size
 was overstated.
 
+### Offline hook replay (free, n=10)
+
+Instead of buying another arm, we replayed both hooks offline against the
+archived trials — `surface` and `guard` are pure functions of (store,
+hook-input), and every input was preserved. `bench/replay_hooks.py`:
+
+| | would have fired |
+|---|---|
+| `surface` | 9/10 trials |
+| `guard` | 9/10 trials |
+
+(Trial 9 wrote no memory at all, so nothing could fire.)
+
+So **"the hooks never fire" is not the explanation for anything.** Both
+channels engage on this task.
+
+Three caveats, because this is a replay and not a measurement:
+
+1. It uses the **fixed** matcher. The trials themselves ran against published
+   0.2.0, whose `json.dumps` haystack could not match quoted or multiline
+   triggers, so what *did* fire during those trials was likely less.
+2. Firing is not helping. The replay shows delivery, not effect.
+3. Look at what `guard` matched: `test_billing_reconciliation` — the *old*
+   test name, meaning the agent re-ran the session-1 test. That is the
+   occurrence-specific-trigger problem, visible in real data.
+
+**The honest position remains: which channel drives the result is unmeasured.**
+What we now know is that both fire, so any explanation resting on "the hooks
+are inert" is wrong.
+
 ### What is unaffected
 
 The **mem0 comparison stands**: `baseline`, `mem0` and `legendary` were all
