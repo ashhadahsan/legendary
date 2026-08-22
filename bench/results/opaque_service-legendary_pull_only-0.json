@@ -1,0 +1,45 @@
+{
+  "scenario": "opaque_service",
+  "arm": "legendary_pull_only",
+  "trial": 0,
+  "session_1": {
+    "cost_usd": 0.9370725000000002,
+    "num_turns": 20,
+    "output_tokens": 4667,
+    "duration_s": 107.1,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": true,
+    "used_remember": true,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "session_2": {
+    "cost_usd": 0.609541,
+    "num_turns": 13,
+    "output_tokens": 4594,
+    "duration_s": 64.1,
+    "is_error": false,
+    "mcp_tools_offered": [],
+    "used_recall": true,
+    "used_remember": true,
+    "operator_env": {
+      "n_slash_commands": 55,
+      "n_tools": 27
+    }
+  },
+  "s1_correct": true,
+  "s2_correct": true,
+  "s2_quirk_hits": 2,
+  "observed": {
+    "hooks_installed": false,
+    "recall_offered": true,
+    "wrote_memory_s1": true,
+    "store_survived_reset": true,
+    "hook_injections_s2": 0,
+    "mem0_used": false
+  },
+  "activation_failures": []
+}
