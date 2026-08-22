@@ -463,7 +463,16 @@ def main() -> int:
     ap.add_argument("-n", "--trials", type=int, default=10)
     ap.add_argument("--workdir", type=Path, required=True)
     ap.add_argument("--scenario", default="opaque_service", choices=list(SCENARIOS))
+    ap.add_argument(
+        "--smoke",
+        action="store_true",
+        help="one trial per arm; exit non-zero on ANY activation failure. Run "
+        "this before spending on a full matrix - it is the gate that would "
+        "have caught the invalid ablation before it cost anything.",
+    )
     args = ap.parse_args()
+    if args.smoke:
+        args.trials = 1
 
     # grep gate: the fixture must not contain the pattern the metric looks for,
     # or reading a file scores as committing the mistake (v1's fatal defect)
