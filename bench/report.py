@@ -8,7 +8,18 @@ import statistics
 from pathlib import Path
 
 RESULTS = Path(__file__).parent / "results"
-ARM_ORDER = ["baseline", "legendary"]
+# every arm must appear here: an arm missing from this list silently
+# bypasses the activation gate, which is how an invalid ablation got
+# published from trials the harness had already rejected.
+ARM_ORDER = [
+    "baseline",
+    "mem0",
+    "both",
+    "legendary_pull_only",
+    "legendary_recall_only",
+    "legendary_hooks_only",
+    "legendary",
+]
 
 
 def _failures(rec: dict) -> list[str]:
@@ -51,7 +62,10 @@ def _table(runs: dict[str, list[dict]], label: str) -> None:
         ok = [r for r in rs if not _failures(r)]
         excluded = len(rs) - len(ok)
         if not ok:
-            print(f"| {arm} | 0 | {excluded} | - | - | - | - | - |")
+            print(
+                f"| {arm} | **0** | {excluded} | EXCLUDED: all {excluded} trials "
+                f"failed activation | - | - | - | - |"
+            )
             continue
         hits = [r["s2_quirk_hits"] for r in ok]
         costs = [r["session_2"].get("cost_usd") or 0 for r in ok]
@@ -83,6 +97,15 @@ def main() -> int:
         _table(by_scenario[scen], scen)
     if len(by_scenario) > 1:
         _table(pooled, "pooled (all scenarios)")
+    # an arm with zero usable trials is a failed run, not a blank row
+    unusable = [
+        arm
+        for arm, rs in pooled.items()
+        if rs and not [r for r in rs if not _failures(r)]
+    ]
+    if unusable:
+        print(f"\nFAILED: no usable trials for {', '.join(sorted(unusable))}")
+        return 1
     return 0
 
 

@@ -73,21 +73,62 @@ SCENARIOS = {
     },
 }
 
-ARMS = {
-    "baseline": [],
-    # the product's default install: hooks primary, MCP add-on
-    "legendary": ["legendary", "hook"],
-    # head-to-head against a known memory tool. Requires OPENAI_API_KEY or
-    # GEMINI_API_KEY: mem0 needs an LLM for fact extraction and an embedder for
-    # retrieval. The adapter is bench/mem0_mcp.py, published for audit.
-    "mem0": ["mem0"],
-    # are they complementary? mem0 has semantic breadth but only answers when
-    # asked; legendary pushes but matches on anchors and literal signatures.
-    "both": ["legendary", "hook", "mem0"],
-    # --- ablation: which channel actually earns its cost? ---
-    "legendary_recall_only": ["legendary"],  # MCP tools, no hooks
-    "legendary_hooks_only": ["hook_only"],  # hooks installed, MCP absent
+# Every arm DECLARES what it expects to be true, including the negatives.
+# Today's invalid ablation happened because configuration was inferred from an
+# arm's label instead of observed: `hooks_only` silently had no MCP (so it could
+# never write a memory) and `recall_only` silently had hooks (so it was just
+# full legendary). Both are caught by the expectations below.
+LOCAL = str(BENCH.parent)  # benchmark the working tree, not whatever PyPI serves
+
+ARMS: dict[str, dict] = {
+    "baseline": {
+        "mcp": [],
+        "install_legendary": False,
+        "expect": {"hooks_installed": False, "wrote_memory_s1": None},
+    },
+    "legendary": {  # the product's default install
+        "mcp": ["legendary"],
+        "install_legendary": True,
+        "expect": {
+            "hooks_installed": True,
+            "recall_offered": True,
+            "wrote_memory_s1": True,
+            "store_survived_reset": True,
+        },
+    },
+    "mem0": {
+        "mcp": ["mem0"],
+        "install_legendary": False,
+        "expect": {"hooks_installed": False, "mem0_used": True},
+    },
+    "both": {
+        "mcp": ["legendary", "mem0"],
+        "install_legendary": True,
+        "expect": {
+            "hooks_installed": True,
+            "wrote_memory_s1": True,
+            "store_survived_reset": True,
+        },
+    },
+    # --- ablation ---
+    "legendary_pull_only": {  # MCP, hooks explicitly stripped after init
+        "mcp": ["legendary"],
+        "install_legendary": True,
+        "strip_hooks": True,
+        "expect": {
+            "hooks_installed": False,  # the negative nobody checked last time
+            "recall_offered": True,
+            "wrote_memory_s1": True,
+            "store_survived_reset": True,
+            "hook_injections_s2": 0,
+        },
+    },
 }
+
+
+def uses_legendary(arm: str) -> bool:
+    return bool(ARMS[arm].get("install_legendary"))
+
 
 GIT_ID = ["-c", "user.email=b@b.b", "-c", "user.name=bench"]
 
@@ -103,7 +144,8 @@ def git(repo: Path, *args: str) -> None:
     subprocess.run(["git", *GIT_ID, *args], cwd=repo, check=True, capture_output=True)
 
 
-def mcp_config(tools: list[str], repo: Path) -> dict:
+def mcp_config(arm: str, repo: Path) -> dict:
+    tools = ARMS[arm]["mcp"]
     servers: dict[str, dict] = {}
     if "mem0" in tools:
         servers["mem0"] = {
@@ -128,7 +170,7 @@ def mcp_config(tools: list[str], repo: Path) -> dict:
             "command": "uvx",
             "args": [
                 "--from",
-                "legendary-mcp",
+                LOCAL,  # working tree, so the bench tests the code under review
                 "legendary",
                 "mcp",
                 "--repo",
@@ -136,6 +178,69 @@ def mcp_config(tools: list[str], repo: Path) -> dict:
             ],
         }
     return {"mcpServers": servers}
+
+
+def hooks_installed(repo: Path) -> bool:
+    """Observed from disk. Never inferred from the arm's name."""
+    settings = repo / ".claude" / "settings.json"
+    if not settings.exists():
+        return False
+    return "legendary surface" in settings.read_text() or (
+        "legendary guard" in settings.read_text()
+    )
+
+
+def strip_hooks(repo: Path) -> None:
+    """Remove legendary's hooks so a pull-only arm genuinely has none."""
+    settings = repo / ".claude" / "settings.json"
+    if not settings.exists():
+        return
+    data = json.loads(settings.read_text())
+    for event, entries in list(data.get("hooks", {}).items()):
+        kept = [
+            e
+            for e in entries
+            if not any("legendary " in h.get("command", "") for h in e.get("hooks", []))
+        ]
+        if kept:
+            data["hooks"][event] = kept
+        else:
+            data["hooks"].pop(event, None)
+    settings.write_text(json.dumps(data, indent=2) + "\n")
+
+
+def injections(repo: Path) -> list[dict]:
+    """What the hooks actually delivered (v0.2.1+ audit log)."""
+    log = repo / ".legendary" / ".injections.jsonl"
+    if not log.exists():
+        return []
+    out = []
+    for line in log.read_text().splitlines():
+        try:
+            out.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return out
+
+
+def check(expect: dict, observed: dict) -> list[str]:
+    """Compare every declared expectation against what was observed.
+
+    Both directions: an arm that was supposed to have no hooks and did have
+    them fails just as loudly as one that was supposed to have them and did
+    not. The missing negative checks are what let the invalid ablation run.
+    """
+    failures = []
+    for key, want in expect.items():
+        if want is None:
+            continue
+        got = observed.get(key)
+        if want == ">0":
+            if not (isinstance(got, int) and got > 0):
+                failures.append(f"{key}: expected >0, observed {got!r}")
+        elif got != want:
+            failures.append(f"{key}: expected {want!r}, observed {got!r}")
+    return failures
 
 
 def run_session(repo: Path, prompt: str, config_path: Path, mock_url: str) -> dict:
@@ -254,7 +359,7 @@ def reset_repo(repo: Path, arm: str) -> None:
     """Session boundary: code reverts to broken; only memory artifacts survive."""
     git(repo, "reset", "--hard", "HEAD")
     keep = ["-e", ".claude", "-e", ".bench-mcp.json"]
-    if "legendary" in ARMS[arm]:
+    if uses_legendary(arm):
         keep += ["-e", ".legendary"]
     subprocess.run(
         ["git", "clean", "-fdq", *keep], cwd=repo, check=True, capture_output=True
@@ -263,6 +368,7 @@ def reset_repo(repo: Path, arm: str) -> None:
 
 def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
     cfg = SCENARIOS[scenario]
+    spec = ARMS[arm]
     repo = workdir / f"{scenario}-{arm}-{index}"
     if repo.exists():
         shutil.rmtree(repo)
@@ -271,40 +377,16 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
     git(repo, "add", "-A")
     git(repo, "commit", "-qm", "scenario")
 
-    tools = ARMS[arm]
     config_path = repo / ".bench-mcp.json"
-    config_path.write_text(json.dumps(mcp_config(tools, repo)))
-    if "hook_only" in tools:
-        # hooks installed by `legendary init`; MCP simply not configured, so the
-        # agent gets push delivery and no way to search deliberately
+    config_path.write_text(json.dumps(mcp_config(arm, repo)))
+    if spec.get("install_legendary"):
         subprocess.run(
-            [
-                "uvx",
-                "--from",
-                "legendary-mcp",
-                "legendary",
-                "init",
-                "--repo",
-                str(repo),
-            ],
+            ["uvx", "--from", LOCAL, "legendary", "init", "--repo", str(repo)],
             check=True,
             capture_output=True,
         )
-    if "legendary" in tools:
-        # v0.2 init installs both hooks itself - that IS the product's default
-        subprocess.run(
-            [
-                "uvx",
-                "--from",
-                "legendary-mcp",
-                "legendary",
-                "init",
-                "--repo",
-                str(repo),
-            ],
-            check=True,
-            capture_output=True,
-        )
+    if spec.get("strip_hooks"):
+        strip_hooks(repo)
 
     log_path = workdir / f"{scenario}-{arm}-{index}-mockpay.jsonl"
     server = None
@@ -316,64 +398,50 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
             ["python3", str(BENCH / "mockpay.py"), str(port), str(log_path)]
         )
         time.sleep(0.5)
+
+    memories = repo / ".legendary" / "memories"
     try:
         s1 = run_session(repo, cfg["session_1"], config_path, mock_url)
         s1_correct = tests_pass(repo, mock_url, cfg["s1_tests"])
         _, log_marker = quirk_hits(log_path, 0)
 
-        wrote_memory = (
-            bool(list((repo / ".legendary" / "memories").glob("*.md")))
-            if ("legendary" in tools or "hook_only" in tools)
-            else None
-        )
+        before = {p.name for p in memories.glob("*.md")} if memories.exists() else set()
+        wrote_memory = bool(before) if uses_legendary(arm) else None
 
         reset_repo(repo, arm)
+        after = {p.name for p in memories.glob("*.md")} if memories.exists() else set()
+        store_survived = None if not uses_legendary(arm) else not (before - after)
 
+        injections_before = len(injections(repo))
         s2 = run_session(repo, cfg["session_2"], config_path, mock_url)
+        s2_injections = len(injections(repo)) - injections_before
+
         if cfg["needs_server"]:
             s2_quirk_hits, _ = quirk_hits(log_path, log_marker)
         else:
             s2_quirk_hits = dead_end_diff_hits(repo, cfg["dead_end_diff"])
         s2_correct = tests_pass(repo, mock_url, cfg["s2_tests"])
-        if "hook" in tools or "hook_only" in tools:
-            surface_fired = bool(list((repo / ".legendary").glob(".surfaced-*")))
-            guard_fired = bool(list((repo / ".legendary").glob(".guarded-*")))
-            hook_fired = surface_fired or guard_fired
-        else:
-            surface_fired = guard_fired = hook_fired = None
     finally:
         if server is not None:
             server.terminate()
 
-    # ---- arm-activation assertions: a trial that did not run its declared
-    # configuration is classified, not silently averaged in ----
-    activation_failures = []
-    if "mem0" in tools:
-        used = any(
-            m in (s.get("transcript") or "")
-            for s in (s1, s2)
-            for m in ("mcp__mem0__add_memory", "mcp__mem0__search_memory")
-        )
-        if not used:
-            activation_failures.append("no_mem0_channel_activated")
-    if "legendary" in tools:
-        # Assert from OBSERVED USE, not from the init event's tool list: that
-        # list does not enumerate MCP tools, so asserting on it excluded every
-        # legendary trial while the agent was demonstrably calling recall and
-        # remember. Activation means a channel actually carried something.
-        channel_worked = (
-            s1.get("used_recall")
-            or s1.get("used_remember")
-            or s2.get("used_recall")
-            or s2.get("used_remember")
-            or hook_fired
-        )
-        if not channel_worked:
-            activation_failures.append("no_legendary_channel_activated")
-        if wrote_memory is False:
-            activation_failures.append("no_memory_written_in_s1")
-    if "hook_only" in tools and not (surface_fired or guard_fired):
-        activation_failures.append("no_hook_fired")
+    # ---- everything below is OBSERVED, then compared to the declaration ----
+    transcripts = (s1.get("transcript") or "") + (s2.get("transcript") or "")
+    observed = {
+        "hooks_installed": hooks_installed(repo),
+        "recall_offered": "mcp__legendary__recall" in transcripts,
+        "wrote_memory_s1": wrote_memory,
+        "store_survived_reset": store_survived,
+        "hook_injections_s2": s2_injections,
+        "mem0_used": any(
+            m in transcripts
+            for m in (
+                '"name": "mcp__mem0__add_memory"',
+                '"name": "mcp__mem0__search_memory"',
+            )
+        ),
+    }
+    activation_failures = check(spec["expect"], observed)
 
     return {
         "scenario": scenario,
@@ -384,10 +452,7 @@ def trial(arm: str, index: int, workdir: Path, scenario: str) -> dict:
         "s1_correct": s1_correct,
         "s2_correct": s2_correct,
         "s2_quirk_hits": s2_quirk_hits,
-        "wrote_memory": wrote_memory,
-        "hook_fired": hook_fired,
-        "surface_fired": surface_fired,
-        "guard_fired": guard_fired,
+        "observed": observed,
         "activation_failures": activation_failures,
     }
 
@@ -432,6 +497,15 @@ def main() -> int:
                 f"s2_correct={record['s2_correct']} "
                 f"activation_failures={record['activation_failures']}"
             )
+            if args.smoke and record["activation_failures"]:
+                print(
+                    f"\nSMOKE FAILED for {arm}: the arm did not run the "
+                    f"configuration it declares.\n  "
+                    + "\n  ".join(record["activation_failures"])
+                    + "\nFix the arm before spending quota on a full run.",
+                    flush=True,
+                )
+                return 1
     return 0
 
 

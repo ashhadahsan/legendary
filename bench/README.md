@@ -79,13 +79,47 @@ Secondary: `s1_correct`, `wrote_memory`, `hook_fired`, `used_recall`,
 
 ## Arm-activation assertions
 
-A trial whose configuration did not actually activate is **classified and
-excluded**, never silently averaged in. `activation_failures` records:
+Every arm **declares** what must be true of it, including negatives, and the
+harness **observes** each one from disk or from the product's own audit log.
+Nothing is inferred from an arm's name.
 
-- `mcp_tools_not_offered` — the init event did not list `mcp__legendary__*`
-- `no_memory_written_in_s1` — the legendary arm wrote nothing to remember
+```python
+"legendary_pull_only": {
+    "expect": {
+        "hooks_installed": False,      # the negative nobody was checking
+        "recall_offered": True,
+        "wrote_memory_s1": True,
+        "store_survived_reset": True,
+        "hook_injections_s2": 0,
+    },
+}
+```
 
-`report.py` prints the excluded count beside every arm.
+Observations: `hooks_installed` reads `.claude/settings.json`;
+`store_survived_reset` snapshots `.legendary/memories/` either side of the
+reset; `hook_injections_s2` counts records in `.legendary/.injections.jsonl`,
+which the hooks themselves write. Any mismatch, in either direction, is
+recorded as an `activation_failure` and the trial is excluded from every table.
+
+This exists because the first ablation was invalid in both arms and nobody
+noticed: one had no write channel at all (and had its store deleted by
+`git clean`), while the other still had hooks installed, making it identical
+to the arm it was supposed to be compared against. Both are caught by the
+expectations above.
+
+**Always smoke first.** `--smoke` runs one trial per arm and exits non-zero on
+any activation failure:
+
+```bash
+uv run python bench/run_bench.py --smoke --arms legendary_pull_only --workdir /tmp/smoke
+```
+
+Never launch a full matrix on an arm that has not passed a smoke trial. That
+single gate would have saved the entire cost of the invalid run.
+
+**The benchmark runs the working tree**, not whatever PyPI currently serves
+(`--from <repo path>`). The invalid run asserted on behaviour that existed only
+locally while the hooks executed the published wheel.
 
 ## Rules
 
