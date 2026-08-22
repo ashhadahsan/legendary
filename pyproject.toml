@@ -1,6 +1,6 @@
 [project]
 name = "legendary-mcp"  # `legendary` is taken on PyPI; CLI command stays `legendary`
-version = "0.2.0"
+version = "0.2.1"
 description = "Code-anchored, staleness-aware, git-native memory for coding agents"
 readme = "README.md"
 requires-python = ">=3.12"
