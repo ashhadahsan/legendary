@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
@@ -15,6 +16,36 @@ from legendary.models import Anchor, Memory
 from legendary.stale import check_memory, worst_verdict
 
 recall = rank.recall  # re-export: service.recall(repo_root, query, ...)
+
+
+_TEST_NAME = re.compile(r"^test_\w+$")
+_DIGIT_RUN = re.compile(r"\d{2,}|\d+\.\d+")
+
+
+def _trigger_warnings(triggers: list[str]) -> list[str]:
+    """Flag triggers that describe THIS occurrence rather than the failure.
+
+    A trigger only works if it recurs byte-identically. Test names and specific
+    numbers are exactly the parts that change: a memory keyed on
+    `test_billing_reconciliation` and `assert 0.0 == 25.0` never fires again
+    when the next failure is `test_refund_reconciliation` / `assert 0.0 == 20.0`.
+    Observed in real trials. Warn, never block - the memory is still worth
+    storing.
+    """
+    out = []
+    for trig in triggers:
+        s = trig.strip()
+        if _TEST_NAME.match(s):
+            out.append(
+                f"{trig!r} is a test name, which changes between failures. "
+                "Prefer the exception type and message that will repeat."
+            )
+        elif _DIGIT_RUN.search(s):
+            out.append(
+                f"{trig!r} contains specific numbers, which usually differ next "
+                "time. Prefer the invariant part of the message."
+            )
+    return out
 
 
 def remember(
@@ -100,10 +131,14 @@ def remember(
         )
         store.save(repo_root, superseded)
         idx.upsert(repo_root, superseded)
-    return {
+    result: dict[str, Any] = {
         "id": memory.id,
         "anchors": [a.model_dump(exclude_none=True) for a in resolved],
     }
+    warnings = _trigger_warnings(triggers or [])
+    if warnings:
+        result["trigger_warnings"] = warnings
+    return result
 
 
 def list_memories(

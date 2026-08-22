@@ -93,3 +93,87 @@ def test_guard_does_not_suppress_surface_for_same_memory(
     monkeypatch.setattr("sys.stdin", _io.StringIO(_json.dumps(payload)))
     cli.main(["surface", "--repo", str(repo)])
     assert capsys.readouterr().out.strip() != ""
+
+
+def seed_with_trigger(repo: Path, trigger: str) -> str:
+    return service.remember(
+        repo_root=repo,
+        type="episode",
+        title="quoted trigger episode",
+        body="Send amounts as decimal strings.",
+        anchors=[{"file": "src/sync/worker.py"}],
+        triggers=[trigger],
+    )["id"]
+
+
+def test_guard_matches_trigger_containing_double_quotes(repo, monkeypatch, capsys):
+    """json.dumps escapes quotes, so a quoted trigger could never match output
+    that verbatim contained it. Agents naturally write quoted triggers."""
+    seed_with_trigger(repo, 'response {"status": "accepted"}')
+    _, out = guard(
+        repo, monkeypatch, capsys, 'server said: response {"status": "accepted"}', "q1"
+    )
+    assert out.strip(), "a trigger containing a quote must still match"
+
+
+def test_guard_matches_trigger_with_brackets_and_parens(repo, monkeypatch, capsys):
+    seed_with_trigger(repo, 'server_totals()["batch"]')
+    _, out = guard(
+        repo, monkeypatch, capsys, 'assert server_totals()["batch"] == 25.0', "q2"
+    )
+    assert out.strip(), "a trigger with brackets and quotes must match"
+
+
+def test_guard_matches_trigger_spanning_a_newline(repo, monkeypatch, capsys):
+    seed_with_trigger(repo, "Traceback (most recent call last):\n  File")
+    _, out = guard(
+        repo,
+        monkeypatch,
+        capsys,
+        'Traceback (most recent call last):\n  File "x.py", line 1',
+        "q3",
+    )
+    assert out.strip(), "a multiline trigger must match"
+
+
+def test_guard_still_silent_on_unrelated_output_after_fix(repo, monkeypatch, capsys):
+    seed_with_trigger(repo, 'response {"status": "accepted"}')
+    _, out = guard(repo, monkeypatch, capsys, "everything is fine, 5 passed", "q4")
+    assert out.strip() == "", "no false positives"
+
+
+def test_test_name_trigger_warns_but_still_saves(repo: Path):
+    r = service.remember(
+        repo_root=repo,
+        type="episode",
+        title="keyed on a test name",
+        body="b",
+        anchors=[],
+        triggers=["test_billing_reconciliation"],
+    )
+    assert r["id"], "the memory must still be saved"
+    assert any("test name" in w for w in r["trigger_warnings"])
+
+
+def test_numeric_trigger_warns(repo: Path):
+    r = service.remember(
+        repo_root=repo,
+        type="episode",
+        title="keyed on numbers",
+        body="b",
+        anchors=[],
+        triggers=["assert 0.0 == 25.0"],
+    )
+    assert any("specific numbers" in w for w in r["trigger_warnings"])
+
+
+def test_invariant_trigger_does_not_warn(repo: Path):
+    r = service.remember(
+        repo_root=repo,
+        type="episode",
+        title="keyed on the exception",
+        body="b",
+        anchors=[],
+        triggers=["sqlite3.OperationalError: database is locked"],
+    )
+    assert "trigger_warnings" not in r

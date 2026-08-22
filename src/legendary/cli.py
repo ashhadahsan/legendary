@@ -198,6 +198,27 @@ def _cmd_surface(repo: Path) -> int:
     return 0
 
 
+def _haystack(obj: object) -> str:
+    """Flatten a tool response to the raw text it actually emitted.
+
+    Deliberately NOT json.dumps: that escapes quotes, newlines and backslashes,
+    so any trigger containing one could never match output that verbatim
+    contained it. Agents naturally write triggers like
+    `server_totals()["batch"]`, and every one of them was dead.
+    """
+    parts: list[str] = []
+    stack: list[object] = [obj]
+    while stack:
+        v = stack.pop()
+        if isinstance(v, dict):
+            stack.extend(v.values())
+        elif isinstance(v, (list, tuple)):
+            stack.extend(v)
+        else:
+            parts.append(str(v))
+    return "\n".join(parts).lower()
+
+
 def _cmd_guard(repo: Path) -> int:
     """PostToolUse hook on Bash: inject episodes whose triggers match output.
 
@@ -211,7 +232,7 @@ def _cmd_guard(repo: Path) -> int:
         return 0
     if hook.get("tool_name") != "Bash":
         return 0
-    haystack = json.dumps(hook.get("tool_response") or {}).lower()
+    haystack = _haystack(hook.get("tool_response") or {})
     if not haystack or haystack == "{}":
         return 0
     from legendary.index import all_triggers

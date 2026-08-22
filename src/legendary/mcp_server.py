@@ -56,8 +56,11 @@ def build_server(repo_root: Path) -> MCPServer:
         resolved and content-hashed now so staleness can be detected later.
         Pass supersedes=<memory_id> when this memory corrects an existing one:
         the old memory is deprecated and back-linked instead of being lost.
-        type=episode REQUIRES triggers: the verbatim error strings or failing
-        test names you observed, so the memory resurfaces on the same failure."""
+        type=episode REQUIRES triggers: the part of the failure that will be
+        byte-identical next time - the exception type and message, e.g.
+        "sqlite3.OperationalError: database is locked". NOT test names and NOT
+        specific numbers; those change between occurrences, so a memory keyed on
+        them never fires again."""
         return json.dumps(
             service.remember(
                 repo_root,
