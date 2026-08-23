@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="920" height="440" viewBox="0 0 920 440" role="img"
-     aria-label="Terminal demo: a test fails, legendary surfaces the recorded fix unprompted, the code changes, and the same memory returns marked stale.">
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="470" viewBox="0 0 920 470" role="img"
+     aria-label="Terminal demo: a test fails, legendary surfaces the recorded fix unprompted with the commit it was verified against, the code changes, and the same memory returns marked stale with the commit, the size of the change, and the git diff command.">
   <style>
     .win  { fill: #16161f; stroke: #282836; stroke-width: 1.5; }
     .bar  { fill: #1d1d29; }
@@ -7,48 +7,47 @@
     text  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 15px; }
     .title{ fill: #77778c; font-size: 13px; }
     .cmd  { fill: #ececf3; } .dim { fill: #77778c; } .err { fill: #fb7185; }
-    .ok   { fill: #2dd4bf; } .warn { fill: #fbbf24; } .body { fill: #a9a9bd; font-size: 14px; }
-    /* Default VISIBLE: any renderer that strips or ignores CSS animation shows
-       the complete frame rather than an empty terminal. */
+    .ok   { fill: #2dd4bf; } .warn { fill: #fbbf24; }
+    .meta { fill: #a9a9bd; font-size: 13.5px; }
+    /* Default VISIBLE: a renderer that strips CSS animation shows the whole
+       sequence rather than an empty terminal. */
     .step { opacity: 1; }
-    .s1,.s2,.s3,.s4,.s5,.s6 { animation: show 16s infinite both; }
-    .s1 { animation-delay: 0.2s } .s2 { animation-delay: 1.4s }
-    .s3 { animation-delay: 2.6s } .s4 { animation-delay: 6.2s }
-    .s5 { animation-delay: 7.4s } .s6 { animation-delay: 8.6s }
-    @keyframes show { 0% { opacity: 0 } 1.5% { opacity: 1 } 92% { opacity: 1 } 100% { opacity: 0 } }
+    .s1,.s2,.s3,.s4,.s5,.s6 { animation: show 17s infinite both; }
+    .s1 { animation-delay: 0.2s } .s2 { animation-delay: 1.3s }
+    .s3 { animation-delay: 2.4s } .s4 { animation-delay: 6.6s }
+    .s5 { animation-delay: 7.7s } .s6 { animation-delay: 8.8s }
+    @keyframes show { 0% { opacity: 0 } 1.5% { opacity: 1 } 93% { opacity: 1 } 100% { opacity: 0 } }
     @media (prefers-reduced-motion: reduce) { .step { opacity: 1; animation: none } }
   </style>
 
-  <rect width="920" height="440" rx="12" class="win"/>
+  <rect width="920" height="470" rx="12" class="win"/>
   <path d="M0 12a12 12 0 0 1 12-12h896a12 12 0 0 1 12 12v26H0z" class="bar"/>
   <circle cx="24" cy="19" r="6" class="dot1"/>
   <circle cx="46" cy="19" r="6" class="dot2"/>
   <circle cx="68" cy="19" r="6" class="dot3"/>
   <text x="460" y="24" text-anchor="middle" class="title">your-repo — claude code</text>
 
-  <!-- 1. the test fails -->
-  <g class="step s1"><text x="28" y="76"><tspan class="dim">$</tspan> <tspan class="cmd">pytest tests/test_billing.py</tspan></text></g>
-  <g class="step s2"><text x="28" y="104" class="err">E   assert 0.0 == 25.00  — reconciliation failed</text></g>
+  <g class="step s1"><text x="28" y="74"><tspan class="dim">$</tspan> <tspan class="cmd">pytest tests/test_billing.py</tspan></text></g>
+  <g class="step s2"><text x="28" y="100" class="err">E   assert 0.0 == 25.00  — reconciliation failed</text></g>
 
-  <!-- 2. legendary interrupts, unprompted -->
   <g class="step s3">
-    <rect x="28" y="122" width="864" height="86" rx="8" fill="#12211e" stroke="#1f5f52" stroke-width="1.5"/>
-    <text x="46" y="148" class="ok">This failure has been seen before. Recorded episodes:</text>
-    <text x="46" y="172" class="cmd">- [episode] Send payment amounts as decimal strings, not floats</text>
-    <text x="46" y="194" class="body">  the service drops float amounts and still returns 200 accepted</text>
+    <rect x="28" y="116" width="864" height="104" rx="8" fill="#12211e" stroke="#1f5f52" stroke-width="1.5"/>
+    <text x="46" y="142" class="ok">This failure has been seen before. Recorded episodes:</text>
+    <text x="46" y="166" class="cmd">- [episode] Send payment amounts as decimal strings, not floats</text>
+    <text x="46" y="190" class="meta">recorded 2026-08-14 · verified against billing/client.py @ 8fa2c31</text>
+    <text x="46" y="210" class="meta">the service drops float amounts and still returns 200 accepted</text>
   </g>
 
-  <!-- 3. someone edits the anchored code -->
-  <g class="step s4"><text x="28" y="248"><tspan class="dim">$</tspan> <tspan class="cmd">git commit -m "refactor billing client"</tspan></text></g>
-  <g class="step s5"><text x="28" y="276"><tspan class="dim">$</tspan> <tspan class="cmd">pytest tests/test_billing.py</tspan></text></g>
+  <g class="step s4"><text x="28" y="258"><tspan class="dim">$</tspan> <tspan class="cmd">git commit -m "refactor billing client"</tspan></text></g>
+  <g class="step s5"><text x="28" y="284"><tspan class="dim">$</tspan> <tspan class="cmd">pytest tests/test_billing.py</tspan></text></g>
 
-  <!-- 4. same memory, trust downgraded -->
   <g class="step s6">
-    <rect x="28" y="294" width="864" height="86" rx="8" fill="#211c10" stroke="#6b4a12" stroke-width="1.5"/>
-    <text x="46" y="320" class="warn">This failure has been seen before. Recorded episodes:</text>
-    <text x="46" y="344" class="cmd">- [episode] Send payment amounts as decimal strings, not floats</text>
-    <text x="46" y="366" class="warn">  [stale — billing/client.py changed since this was written; verify]</text>
+    <rect x="28" y="300" width="864" height="104" rx="8" fill="#211c10" stroke="#6b4a12" stroke-width="1.5"/>
+    <text x="46" y="326" class="warn">This failure has been seen before. Recorded episodes:</text>
+    <text x="46" y="350" class="cmd">- [episode] Send payment amounts as decimal strings, not floats</text>
+    <text x="46" y="374" class="warn">stale — billing/client.py changed since 8fa2c31 (+18 -4)</text>
+    <text x="46" y="394" class="meta">see: git diff 8fa2c31..HEAD -- billing/client.py</text>
   </g>
 
-  <text x="28" y="414" class="dim">no recall call · no query · the memory arrives on its own</text>
+  <text x="28" y="442" class="dim">every memory carries the commit it was verified against — and tells you what changed since</text>
 </svg>

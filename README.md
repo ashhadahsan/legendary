@@ -34,9 +34,12 @@ when the code moves on:
   <img src="assets/demo.svg" alt="A test fails; legendary surfaces the recorded fix without being asked; the code changes; the same memory returns marked stale." width="820">
 </p>
 
-No `recall` call. No query. **That stale flag is the part nobody else has** —
-every other memory tool keeps asserting a claim that stopped being true weeks
-ago.
+No `recall` call. No query. Every memory carries **the commit it was verified
+against**, so a stale warning tells you which file moved, by how much, and the
+exact diff to read — instead of just "this might be out of date."
+
+**No other memory tool can do that**, because none of them anchor a memory to
+code in the first place.
 
 ```bash
 uvx --from legendary-mcp legendary init
