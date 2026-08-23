@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,20 +153,62 @@ def _audit(
         pass
 
 
-def _render_memory(m: object, verdict: str) -> str:
+def _change_size(repo: Path, commit: str, file: str) -> str:
+    """`+18 -4` for the anchored file since the commit it was verified at.
+
+    Included so the agent can judge whether the change is worth reading before
+    spending a turn on `git diff`. Never raises: a broken hook must not break
+    the agent, and a missing commit just means no summary.
+    """
+    try:
+        out = subprocess.run(
+            ["git", "diff", "--numstat", f"{commit}..HEAD", "--", file],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if out.returncode != 0 or not out.stdout.strip():
+            return ""
+        added, removed, *_ = out.stdout.split()
+        return f" (+{added} -{removed})"
+    except Exception:
+        return ""
+
+
+def _render_memory(m: object, verdict: str, repo: Path | None = None) -> str:
     """Imperative guardrail rendering shared by surface and guard.
 
-    Fresh carries the affordance that licenses acting without re-derivation;
-    stale carries the instruction to verify. Both are the product's voice."""
+    Fresh licenses acting without re-derivation. Stale must be *actionable*:
+    saying "the code changed" without saying which file, which commit, or how
+    to see the change leaves the reader to go find it themselves.
+    """
     title = getattr(m, "title")
     body = getattr(m, "body")[:300]
     mtype = getattr(m, "type")
+    created = getattr(m, "created", None)
+    when = created.date().isoformat() if created else "unknown date"
+
+    anchors = getattr(m, "anchors", []) or []
+    anchor = anchors[0] if anchors else None
+    where = getattr(anchor, "file", None) if anchor else None
+    commit = getattr(anchor, "commit", None) if anchor else None
+
     if verdict == "fresh":
-        return f"- [{mtype}] {title} (verified against current code): {body}"
-    return (
-        f"- [{mtype}] {title} [{verdict} - code changed since this was "
-        f"written; verify before trusting]: {body}"
-    )
+        scope = f"{where} @ {commit}" if where and commit else "current code"
+        return (
+            f"- [{mtype}] {title} (recorded {when}, verified against {scope}): {body}"
+        )
+
+    if where and commit:
+        size = _change_size(repo, commit, where) if repo else ""
+        detail = (
+            f"{verdict} - {where} changed since {commit}{size}, recorded {when}; "
+            f"see: git diff {commit}..HEAD -- {where}"
+        )
+    else:
+        detail = f"{verdict} - recorded {when}; the anchored code has changed, verify"
+    return f"- [{mtype}] {title} [{detail}]: {body}"
 
 
 def _cmd_surface(repo: Path) -> int:
@@ -203,7 +246,7 @@ def _cmd_surface(repo: Path) -> int:
         if m is None or m.status != "active":
             continue
         verdict = worst_verdict(check_memory(repo, m.anchors))
-        lines.append(_render_memory(m, verdict))
+        lines.append(_render_memory(m, verdict, repo))
         rendered.append(mid)
     if not lines:
         return 0
@@ -290,7 +333,7 @@ def _cmd_guard(repo: Path) -> int:
         if m is None or m.status != "active":
             continue
         verdict = worst_verdict(check_memory(repo, m.anchors))
-        lines.append(_render_memory(m, verdict))
+        lines.append(_render_memory(m, verdict, repo))
         rendered.append(mid)
     if not lines:
         return 0

@@ -241,3 +241,16 @@ def test_audit_failure_never_breaks_the_hook(repo: Path, monkeypatch, capsys):
         repo, monkeypatch, capsys, "sqlite3.OperationalError: database is locked", "a3"
     )
     assert code == 0 and out.strip(), "the hook still delivers when auditing fails"
+
+
+def test_render_survives_a_memory_with_no_anchors(repo: Path, monkeypatch, capsys):
+    service.remember(
+        repo_root=repo,
+        type="episode",
+        title="unanchored",
+        body="b",
+        anchors=[],
+        triggers=["some invariant error"],
+    )
+    _, out = guard(repo, monkeypatch, capsys, "some invariant error here", "r3")
+    assert "unanchored" in json.loads(out)["hookSpecificOutput"]["additionalContext"]

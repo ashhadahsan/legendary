@@ -140,4 +140,27 @@ def test_surface_fresh_memory_is_marked_verified(repo: Path, monkeypatch, capsys
     remember_one(repo)
     _, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py")
     ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
-    assert "(verified against current code)" in ctx
+    assert "verified against" in ctx and "recorded 20" in ctx
+
+
+def test_fresh_render_names_the_commit_it_was_verified_against(
+    repo: Path, monkeypatch, capsys
+):
+    remember_one(repo)
+    _, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py", "r1")
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "recorded 20" in ctx, "the reader needs to know how old this is"
+    assert "src/sync/worker.py @ " in ctx, "and what it was verified against"
+
+
+def test_stale_render_is_actionable(repo: Path, monkeypatch, capsys):
+    """'the code changed' is useless without which file, which commit, and how
+    to see the change."""
+    remember_one(repo)
+    p = repo / "src/sync/worker.py"
+    p.write_text(p.read_text().replace("retries: int = 3", "retries: int = 9"))
+    _, out = surface(repo, monkeypatch, capsys, "src/sync/worker.py", "r2")
+    ctx = json.loads(out)["hookSpecificOutput"]["additionalContext"]
+    assert "stale" in ctx
+    assert "changed since" in ctx
+    assert "git diff" in ctx and "src/sync/worker.py" in ctx

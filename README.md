@@ -27,30 +27,16 @@
 **Your coding agent keeps solving the same problem twice. legendary makes it
 stop — and tells you when its notes have gone stale.**
 
-Watch it interrupt a repeat mistake, unprompted:
+Watch it interrupt a repeat mistake, unprompted — then downgrade its own advice
+when the code moves on:
 
-```console
-$ pytest
-E   AttributeError: 'NoneType' object has no attribute 'strip'
+<p align="center">
+  <img src="assets/demo.svg" alt="A test fails; legendary surfaces the recorded fix without being asked; the code changes; the same memory returns marked stale." width="820">
+</p>
 
-  This failure has been seen before. Recorded episodes:
-  - [episode] strip() crashes on None (verified against current code):
-    Use a guard: data.strip() if data else "". Retries do not help.
-```
-
-No `recall` call. No query. The agent hit a failure whose signature was
-recorded, and the fix came back on its own.
-
-Now someone edits that function. The same memory returns with its trust
-downgraded:
-
-```console
-  - [episode] strip() crashes on None [stale - code changed since this was
-    written; verify before trusting]
-```
-
-**That flag is the part nobody else has.** Every other memory tool would keep
-asserting a claim that stopped being true weeks ago.
+No `recall` call. No query. **That stale flag is the part nobody else has** —
+every other memory tool keeps asserting a claim that stopped being true weeks
+ago.
 
 ```bash
 uvx --from legendary-mcp legendary init
