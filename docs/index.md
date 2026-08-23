@@ -1,6 +1,36 @@
 # legendary
 
-**A delivery-and-verification layer for coding-agent memory.**
+**Your coding agent keeps solving the same problem twice. legendary makes it
+stop — and tells you when its notes have gone stale.**
+
+```console
+$ pytest
+E   AttributeError: 'NoneType' object has no attribute 'strip'
+
+  This failure has been seen before. Recorded episodes:
+  - [episode] strip() crashes on None (verified against current code):
+    Use a guard: data.strip() if data else "". Retries do not help.
+```
+
+No `recall` call. No query. The agent hit a failure whose signature was
+recorded, and the fix came back on its own.
+
+Edit that function, and the same memory returns with its trust downgraded:
+
+```console
+  - [episode] strip() crashes on None [stale - code changed since this was
+    written; verify before trusting]
+```
+
+**That flag is the part nobody else has.** Every other memory tool keeps
+asserting claims that stopped being true weeks ago. Stale procedure applied
+confidently is worse than no memory at all.
+
+```bash
+uvx --from legendary-mcp legendary init
+```
+
+## Why this exists
 
 Most knowledge already has a home: decisions belong in comments and ADRs,
 conventions in CLAUDE.md, references in docs. Two things have no home anywhere:
@@ -12,28 +42,6 @@ conventions in CLAUDE.md, references in docs. Two things have no home anywhere:
 
 legendary does exactly those two things, and pushes the result back at the
 moment it matters.
-
-## The mechanism
-
-```console
-$ # agent runs tests, sees: AttributeError: 'NoneType' has no attribute 'strip'
-This failure has been seen before. Recorded episodes:
-- [episode] strip() crashes on None (verified against current code):
-  Use a guard: data.strip() if data else "". Retries do not help.
-```
-
-No `recall` call. No query. The agent hit a failure whose signature was
-recorded, and the episode came back on its own.
-
-Change the anchored code and the same memory arrives differently:
-
-```console
-- [episode] strip() crashes on None [stale - code changed since this was
-  written; verify before trusting]: ...
-```
-
-That downgrade is what makes reusable procedure safe. A stale procedure applied
-confidently is worse than no memory at all.
 
 ## Properties
 

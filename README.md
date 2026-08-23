@@ -24,47 +24,41 @@
 
 ---
 
-Coding agents are stateless: every session re-reads your repo, re-derives old
-decisions, and repeats debugging attempts that already failed. Memory
-frameworks remember conversations but are code-blind - a memory never knows it
-was about `src/sync/worker.py:120` and never notices when that code changes.
+**Your coding agent keeps solving the same problem twice. legendary makes it
+stop — and tells you when its notes have gone stale.**
 
-legendary is a **delivery-and-verification layer**: it holds the knowledge that
-has no home in your codebase, and pushes it back — verified — at the moment the
-agent needs it.
-
-- **Pushed, not fetched** - hooks deliver memories when the agent opens a file
-  or when a failure it has seen before reappears. No `recall` call required.
-- **Verified** - every memory is anchored to a file/symbol/commit and
-  content-hashed; when that code changes, the memory arrives flagged `stale`
-- **Two types** - `decision` (why it is this way) and `episode` (tried X,
-  failed because Y). Conventions belong in CLAUDE.md; docs belong in docs.
-- **Git-native** - markdown in `.legendary/memories/`, committed with your
-  code, reviewed in PRs, shared with your team
-- **Local-first** - no cloud, no accounts, no API keys, no embeddings
-
-## The 30-second demo
-
-Your agent hits an error it has hit before. Without being asked, legendary
-interrupts with what you already learned:
+Watch it interrupt a repeat mistake, unprompted:
 
 ```console
-$ # agent runs the tests, sees: AttributeError: 'NoneType' has no attribute 'strip'
-This failure has been seen before. Recorded episodes:
-- [episode] strip() crashes on None (verified against current code):
-  Use a guard: data.strip() if data else "". Retries do not help.
+$ pytest
+E   AttributeError: 'NoneType' object has no attribute 'strip'
+
+  This failure has been seen before. Recorded episodes:
+  - [episode] strip() crashes on None (verified against current code):
+    Use a guard: data.strip() if data else "". Retries do not help.
 ```
 
-Then someone changes the anchored function. The same memory now arrives with
-its trust downgraded:
+No `recall` call. No query. The agent hit a failure whose signature was
+recorded, and the fix came back on its own.
+
+Now someone edits that function. The same memory returns with its trust
+downgraded:
 
 ```console
-- [episode] strip() crashes on None [stale - code changed since this was
-  written; verify before trusting]: ...
+  - [episode] strip() crashes on None [stale - code changed since this was
+    written; verify before trusting]
 ```
 
-That flag is the point. Every other memory system would keep asserting the
-stale claim as fact.
+**That flag is the part nobody else has.** Every other memory tool would keep
+asserting a claim that stopped being true weeks ago.
+
+```bash
+uvx --from legendary-mcp legendary init
+```
+
+Four dependencies. No cloud, no API keys, no vector database, no LLM in the
+loop. Memories are markdown in your repo — committed, reviewed in PRs, shared
+with your team.
 
 ## Quick start
 
@@ -277,6 +271,7 @@ Full docs at **[ashhadahsan.github.io/legendary](https://ashhadahsan.github.io/l
 [FAQ](https://ashhadahsan.github.io/legendary/faq/).
 
 Contributing? See [CONTRIBUTING.md](CONTRIBUTING.md).
+Release history: [CHANGELOG.md](CHANGELOG.md).
 
 ## License
 
