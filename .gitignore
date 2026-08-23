@@ -10,3 +10,7 @@ dist/
 
 # preserved benchmark evidence is committed on purpose
 !bench/results/artifacts/
+.legendary/index.db
+.legendary/.surfaced-*
+.legendary/.guarded-*
+.legendary/.injections.jsonl

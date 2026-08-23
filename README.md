@@ -114,6 +114,20 @@ weights, no tuning. Recency is deliberately absent: a memory whose anchor still
 hashes fresh has *survived*, and penalizing it for age would double-count what
 staleness already measures.
 
+## This repo uses it
+
+`legendary` records its own mistakes. Real memories from building it, anchored
+to the code they came from:
+
+```console
+$ legendary search "why did the benchmark arms run the wrong config"
+[fresh] benchmark arms silently ran the wrong configuration three times
+        anchored: bench/run_bench.py
+```
+
+Browse them in [`.legendary/memories/`](.legendary/memories/) — they are
+markdown, committed, and reviewed like any other file.
+
 ## How staleness works
 
 At write time each anchor stores a normalized content hash of the anchored
@@ -212,34 +226,29 @@ Human-readable, PR-reviewable, and it merges like code.
 
 ## Benchmark
 
-Head-to-head on a task where the needed knowledge cannot be recovered from the
-repository, with the working tree hard-reset between sessions so memory is the
-only channel. n=10 per arm.
+On a task where the needed knowledge **cannot be recovered from the repository**
+— it lives in an opaque service, and the working tree is hard-reset between
+sessions — n=10 per arm:
 
-| arm | median rediscoveries in session 2 | s2 cost |
-|---|---|---|
-| no memory | 9.5 | $0.60 |
-| mem0 | **11.5** | $0.77 |
-| **legendary** | **1.0** | $0.60 |
+![Rediscoveries in session 2, every trial](docs/assets/rediscoveries.svg)
 
-legendary vs mem0: **p = 0.00705**. mem0 vs no memory at all: p = 0.695 -
-indistinguishable on this task.
+| | median rediscoveries in session 2 |
+|---|---|
+| no memory | 9.5 |
+| mem0 | 11.5 |
+| **legendary** | **1.0** |
 
-We published an ablation claiming the hooks are not what wins. **It has been
-retracted** - both arms were misconfigured (one had no way to write memories at
-all; the other still had hooks installed, so it was the same configuration as
-full legendary). Which channel drives the result is **unknown**. Details and
-raw data: [benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
+**p = 0.007** vs mem0 (exact permutation test). mem0 was indistinguishable from
+having no memory at all on this task (p = 0.695).
 
-**It is not a universal win.** On a second scenario, where the needed knowledge
-was already in the model's priors, legendary had no effect and cost **54%
-more**. It pays off on arbitrary, environment-specific knowledge - the kind
-with no home in a comment or a README - and is pure overhead otherwise.
+**Where it does not help:** on a second scenario where the needed knowledge was
+already in the model's priors, legendary made no difference and cost **54%
+more**. It pays off on arbitrary, environment-specific knowledge — the kind with
+no home in a comment — and is overhead otherwise.
 
-An earlier benchmark of ours reported legendary losing and was **retracted for
-measuring nothing**. Full numbers, both scenarios, the retraction, two
-explanations we tested and rejected, and a harness bug we fixed mid-run in our
-own favour: [benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
+Full methodology, every raw trial, the scenarios where it loses, and the
+results we retracted along the way:
+[benchmark](https://ashhadahsan.github.io/legendary/benchmark/).
 
 ## How this differs from other tools
 

@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Read|Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from legendary-mcp legendary surface --repo /Users/ashhad/legendary"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uvx --from legendary-mcp legendary guard --repo /Users/ashhad/legendary"
+          }
+        ]
+      }
+    ]
+  }
+}
