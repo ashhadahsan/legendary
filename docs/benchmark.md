@@ -167,6 +167,8 @@ Raw data for every trial, including the invalid ones, is preserved under
 The first comparison against a memory tool people actually use, rather than
 against nothing.
 
+![Rediscoveries in session 2, every trial](assets/rediscoveries.svg)
+
 | arm | n | median rediscoveries | range | s2 cost | s2 correct |
 |---|---|---|---|---|---|
 | baseline | 10 | 9.5 | 1-15 | $0.60 | 10/10 |
